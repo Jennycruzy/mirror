@@ -5,6 +5,31 @@ export type Agent = {
   version: number;
   status: string;
   on_chain_token_id?: string | null;
+  basescan_url?: string | null;
+  rolling_24h_brier?: number | null;
+  trades_today?: number;
+  open_positions?: number;
+  trade_floor?: number;
+  unrealized_pnl_usd?: number | null;
+  latest_forecast?: {
+    id: string;
+    ticker: string;
+    predicted_direction: "long" | "short" | "flat";
+    confidence: number;
+    will_trade: boolean;
+    status: string;
+    emitted_at: string;
+    brier_score?: number | null;
+  } | null;
+};
+
+export type MirrorEvent = {
+  id?: string;
+  agent_id?: string | null;
+  kind: string;
+  severity?: string;
+  payload?: Record<string, unknown>;
+  created_at?: string;
 };
 
 export type Forecast = {

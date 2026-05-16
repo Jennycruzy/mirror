@@ -11,8 +11,9 @@ export default async function PatchPage({ params }: { params: { id: string } }) 
     patch = undefined;
   }
   return (
-    <main className="min-h-screen p-8">
-      <h1 className="mb-6 text-3xl font-semibold">Patch</h1>
+    <main className="min-h-screen bg-slate-950 px-5 py-8 lg:px-10">
+      <p className="text-xs uppercase tracking-[0.5em] text-violet-300">Patch</p>
+      <h1 className="mb-6 mt-3 text-4xl font-semibold tracking-tight text-slate-50">Holdout gate record</h1>
       <PatchDiff patch={patch} />
     </main>
   );

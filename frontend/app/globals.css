@@ -3,8 +3,12 @@
 @tailwind utilities;
 
 body {
-  background: radial-gradient(circle at top left, rgba(245, 158, 11, 0.16), transparent 32%),
-    radial-gradient(circle at top right, rgba(45, 212, 191, 0.12), transparent 28%), #020617;
+  background: #020617;
   color: #e2e8f0;
+  font-feature-settings: "ss01", "cv01", "cv11";
 }
 
+::selection {
+  background: rgba(245, 158, 11, 0.35);
+  color: #fff7ed;
+}

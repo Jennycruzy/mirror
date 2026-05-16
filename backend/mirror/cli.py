@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from mirror.agents.red import run_red_once
 from mirror.agents.blue import run_blue_scan
+from mirror.agents.patcher import propose_patch_for_finding
 from mirror.agents.strategy_schema import initial_strategy_yaml, parse_strategy_yaml
 from mirror.chain.identity import queue_or_register_agent, verify_identity_abi
 from mirror.chain.reputation import verify_reputation_abi
@@ -306,7 +307,27 @@ def backtest(agent: Annotated[str, typer.Option("--agent")] = "red-a") -> None:
 
 @app.command()
 def patch(agent: Annotated[str, typer.Option("--agent")] = "red-a", finding: Annotated[str | None, typer.Option("--finding")] = None) -> None:
-    raise typer.Exit(f"Patch flow for {agent} requires a real Blue finding id. Received: {finding}")
+    if not finding:
+        raise typer.Exit("--finding is required")
+    patch_row = run_async(_patch(finding))
+    typer.echo(
+        json.dumps(
+            {
+                "patch_id": str(patch_row.id),
+                "target_agent_id": str(patch_row.target_agent_id),
+                "status": patch_row.status,
+                "gate_passed": patch_row.gate_passed,
+                "rejection_reason": patch_row.rejection_reason,
+                "applied_agent_id": str(patch_row.applied_agent_id) if patch_row.applied_agent_id else None,
+            },
+            indent=2,
+        )
+    )
+
+
+async def _patch(finding_id: str):
+    async with SessionLocal() as session:
+        return await propose_patch_for_finding(session, get_settings(), finding_id)
 
 
 if __name__ == "__main__":

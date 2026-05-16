@@ -51,3 +51,23 @@ export type OnchainJob = {
   last_error?: string | null;
   tx_hash?: string | null;
 };
+
+export type PatchRecord = {
+  id: string;
+  source_agent_id?: string | null;
+  target_agent_id: string;
+  blue_finding_id?: string | null;
+  patch_type: string;
+  proposed_patch_json: Record<string, unknown>;
+  holdout_pre_brier?: number | null;
+  holdout_post_brier?: number | null;
+  holdout_pre_trade_rate?: number | null;
+  holdout_post_trade_rate?: number | null;
+  brier_improvement_pct?: number | null;
+  trade_rate_preservation_pct?: number | null;
+  status: string;
+  gate_passed?: boolean | null;
+  rejection_reason?: string | null;
+  applied_agent_id?: string | null;
+  created_at: string;
+};

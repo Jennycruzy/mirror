@@ -113,6 +113,9 @@ async def propose_patch_for_finding(session: AsyncSession, settings: Settings, f
                 payload_json={"patch_id": str(patch.id), "applied_agent_id": str(promoted.id), "brier_improvement_pct": gate.brier_improvement_pct},
             )
         )
+        from mirror.agents.crossover import attempt_crossovers_for_accepted_patch
+
+        await attempt_crossovers_for_accepted_patch(session, settings, patch)
     else:
         finding.status = "patch_rejected"
         session.add(

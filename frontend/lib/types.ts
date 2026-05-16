@@ -71,3 +71,21 @@ export type PatchRecord = {
   applied_agent_id?: string | null;
   created_at: string;
 };
+
+export type LineageNode = {
+  id: string;
+  lineage: string;
+  version: number;
+  token_id?: string | null;
+};
+
+export type LineageEdge = {
+  source: string;
+  target: string;
+  type: "vertical" | "crossover";
+};
+
+export type LineageGraph = {
+  nodes: LineageNode[];
+  edges: LineageEdge[];
+};

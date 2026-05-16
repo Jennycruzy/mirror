@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from mirror.agents.red import run_red_once
 from mirror.agents.blue import run_blue_scan
+from mirror.agents.crossover import attempt_crossovers_for_patch
 from mirror.agents.patcher import propose_patch_for_finding
 from mirror.agents.strategy_schema import initial_strategy_yaml, parse_strategy_yaml
 from mirror.chain.identity import queue_or_register_agent, verify_identity_abi
@@ -328,6 +329,34 @@ def patch(agent: Annotated[str, typer.Option("--agent")] = "red-a", finding: Ann
 async def _patch(finding_id: str):
     async with SessionLocal() as session:
         return await propose_patch_for_finding(session, get_settings(), finding_id)
+
+
+@app.command()
+def crossover(patch_id: Annotated[str, typer.Option("--patch")]) -> None:
+    patches = run_async(_crossover(patch_id))
+    typer.echo(
+        json.dumps(
+            {
+                "patches": [
+                    {
+                        "patch_id": str(p.id),
+                        "target_agent_id": str(p.target_agent_id),
+                        "status": p.status,
+                        "gate_passed": p.gate_passed,
+                        "rejection_reason": p.rejection_reason,
+                        "applied_agent_id": str(p.applied_agent_id) if p.applied_agent_id else None,
+                    }
+                    for p in patches
+                ]
+            },
+            indent=2,
+        )
+    )
+
+
+async def _crossover(patch_id: str):
+    async with SessionLocal() as session:
+        return await attempt_crossovers_for_patch(session, get_settings(), patch_id)
 
 
 if __name__ == "__main__":

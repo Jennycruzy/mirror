@@ -43,7 +43,14 @@ async def queue_or_register_agent(session: AsyncSession, settings: Settings, age
     if existing:
         return existing
 
-    payload = build_agent_registration_payload(settings, agent, token_id=None)
+    parent_token_id, crossover_parent_token_id = await load_parent_token_ids(session, agent)
+    payload = build_agent_registration_payload(
+        settings,
+        agent,
+        token_id=None,
+        parent_token_id=parent_token_id,
+        crossover_parent_token_id=crossover_parent_token_id,
+    )
     job = OnchainJob(job_type="register_agent", agent_id=agent.id, patch_id=None, status="queued", payload_json=payload)
     session.add(job)
     session.add(Event(agent_id=agent.id, kind="onchain_registration_queued", severity="info", payload_json={"agent_id": str(agent.id)}))
@@ -66,7 +73,14 @@ async def execute_registration_job(session: AsyncSession, settings: Settings, jo
         provisional_uri = f"ipfs://{provisional_cid}"
         result = await ChainClient(settings).register_agent(provisional_uri)
         token_id = result["token_id"]
-        final_payload = build_agent_registration_payload(settings, agent, token_id=token_id)
+        parent_token_id, crossover_parent_token_id = await load_parent_token_ids(session, agent)
+        final_payload = build_agent_registration_payload(
+            settings,
+            agent,
+            token_id=token_id,
+            parent_token_id=parent_token_id,
+            crossover_parent_token_id=crossover_parent_token_id,
+        )
         final_cid = await IPFSClient(settings).pin_json(f"mirror-{agent.lineage}-v{agent.version}", final_payload)
         final_uri = f"ipfs://{final_cid}"
         set_uri = await ChainClient(settings).set_agent_uri(int(token_id), final_uri)
@@ -91,7 +105,25 @@ async def execute_registration_job(session: AsyncSession, settings: Settings, jo
         session.add(Event(agent_id=agent.id, kind="onchain_registration_failed", severity="error", payload_json={"error": str(exc)}))
 
 
-def build_agent_registration_payload(settings: Settings, agent: Agent, token_id: str | None) -> dict[str, Any]:
+async def load_parent_token_ids(session: AsyncSession, agent: Agent) -> tuple[str | None, str | None]:
+    parent_token_id = None
+    crossover_parent_token_id = None
+    if agent.parent_agent_id:
+        parent = await session.get(Agent, agent.parent_agent_id)
+        parent_token_id = parent.on_chain_token_id if parent else None
+    if agent.crossover_parent_agent_id:
+        crossover_parent = await session.get(Agent, agent.crossover_parent_agent_id)
+        crossover_parent_token_id = crossover_parent.on_chain_token_id if crossover_parent else None
+    return parent_token_id, crossover_parent_token_id
+
+
+def build_agent_registration_payload(
+    settings: Settings,
+    agent: Agent,
+    token_id: str | None,
+    parent_token_id: str | None = None,
+    crossover_parent_token_id: str | None = None,
+) -> dict[str, Any]:
     return build_registration_file(
         name=f"MIRROR {agent.lineage.upper()} v{agent.version}",
         description=f"Adversarially-calibrated trading agent. Lineage: {agent.prior}.",
@@ -102,6 +134,6 @@ def build_agent_registration_payload(settings: Settings, agent: Agent, token_id:
         lineage=agent.lineage,
         version=agent.version,
         strategy_hash=agent.strategy_hash,
-        parent_token_id=None,
-        crossover_parent_token_id=None,
+        parent_token_id=parent_token_id,
+        crossover_parent_token_id=crossover_parent_token_id,
     )

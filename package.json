@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "name": "mirror-workspace",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter mirror-frontend dev",
+    "lint": "pnpm --filter mirror-frontend lint"
+  }
+}
+

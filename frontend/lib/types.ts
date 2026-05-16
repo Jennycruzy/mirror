@@ -1,0 +1,53 @@
+export type Agent = {
+  id: string;
+  lineage: string;
+  name: string;
+  version: number;
+  status: string;
+  on_chain_token_id?: string | null;
+};
+
+export type Forecast = {
+  id: string;
+  agent_id: string;
+  ticker: string;
+  predicted_direction: "long" | "short" | "flat";
+  confidence: number;
+  probability_up: number;
+  will_trade: boolean;
+  status: string;
+  emitted_at: string;
+  resolves_at: string;
+  brier_score?: number | null;
+};
+
+export type CalibrationBucket = {
+  lower: number;
+  upper: number;
+  count: number;
+  predicted_avg: number | null;
+  realized_frequency: number | null;
+};
+
+export type BlueFinding = {
+  id: string;
+  agent_id: string;
+  sample_size: number;
+  predicted_confidence_avg: number;
+  realized_accuracy: number;
+  brier_gap: number;
+  suggested_failure_mode: string;
+  suggested_fix_direction: string;
+  status: string;
+  created_at: string;
+};
+
+export type OnchainJob = {
+  id: string;
+  job_type: string;
+  agent_id?: string | null;
+  status: string;
+  attempt_count: number;
+  last_error?: string | null;
+  tx_hash?: string | null;
+};

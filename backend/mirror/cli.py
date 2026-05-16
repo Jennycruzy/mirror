@@ -12,14 +12,14 @@ from mirror.agents.blue import run_blue_scan
 from mirror.agents.crossover import attempt_crossovers_for_patch
 from mirror.agents.patcher import propose_patch_for_finding
 from mirror.agents.strategy_schema import initial_strategy_yaml, parse_strategy_yaml
-from mirror.chain.identity import queue_or_register_agent, verify_identity_abi
-from mirror.chain.reputation import verify_reputation_abi
+from mirror.chain.identity import execute_registration_job, queue_or_register_agent, verify_identity_abi
+from mirror.chain.reputation import execute_brier_feedback_job, verify_reputation_abi
 from mirror.clients.chain import ChainClient
 from mirror.clients.featherless import FeatherlessClient
 from mirror.clients.gemini import GeminiClient
 from mirror.clients.kraken import KrakenClient
 from mirror.config import get_settings
-from mirror.db import SessionLocal, create_all
+from mirror.db import Base, SessionLocal, create_all, engine
 from mirror.logging import configure_logging
 from mirror.models import Agent, BlueFinding, Event, Forecast, OnchainJob, Patch, Trade
 from mirror.orchestrator.resolution import build_resolution_graph
@@ -28,8 +28,10 @@ from mirror.orchestrator.schedule import build_scheduler
 app = typer.Typer(no_args_is_help=True)
 init_app = typer.Typer(no_args_is_help=True)
 run_app = typer.Typer(no_args_is_help=True)
+onchain_app = typer.Typer(no_args_is_help=True)
 app.add_typer(init_app, name="init")
 app.add_typer(run_app, name="run")
+app.add_typer(onchain_app, name="onchain")
 
 
 def run_async(coro):
@@ -280,7 +282,14 @@ async def _status() -> dict:
 def reset(confirm: Annotated[bool, typer.Option("--confirm")] = False) -> None:
     if not confirm:
         raise typer.Exit("Refusing reset without --confirm")
-    raise typer.Exit("Reset is intentionally not implemented yet to avoid destructive mistakes.")
+    run_async(_reset())
+    typer.echo("Database reset complete.")
+
+
+async def _reset() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
 
 
 @app.command("register-agents")
@@ -299,6 +308,68 @@ async def _register_agents() -> list[dict]:
             output.append({"agent_id": str(agent.id), "lineage": agent.lineage, "job_id": str(job.id) if job else None, "status": job.status if job else "already_registered"})
         await session.commit()
         return output
+
+
+@onchain_app.command("retry")
+def retry_onchain_jobs() -> None:
+    result = run_async(_retry_onchain_jobs())
+    typer.echo(json.dumps(result, indent=2))
+
+
+async def _retry_onchain_jobs() -> dict:
+    settings = get_settings()
+    processed = []
+    async with SessionLocal() as session:
+        jobs = (
+            await session.execute(
+                select(OnchainJob)
+                .where(OnchainJob.status.in_(["queued", "failed"]))
+                .order_by(OnchainJob.created_at.asc())
+                .limit(25)
+            )
+        ).scalars().all()
+        for job in jobs:
+            if job.job_type == "register_agent":
+                await execute_registration_job(session, settings, job)
+            elif job.job_type == "post_brier_feedback":
+                await execute_brier_feedback_job(session, settings, job)
+            else:
+                job.status = "failed"
+                job.last_error = f"unknown onchain job type: {job.job_type}"
+            processed.append({"job_id": str(job.id), "job_type": job.job_type, "status": job.status, "last_error": job.last_error})
+        await session.commit()
+    return {"processed": processed}
+
+
+@app.command()
+def smoke() -> None:
+    result = run_async(_smoke())
+    typer.echo(json.dumps(result, indent=2, default=str))
+    if not result["ok"]:
+        raise typer.Exit(1)
+
+
+async def _smoke() -> dict:
+    checks = {}
+    try:
+        import mirror.api.main  # noqa: F401
+        from mirror.orchestrator.graph import build_red_graph
+        from mirror.orchestrator.resolution import build_resolution_graph
+
+        build_red_graph()
+        build_resolution_graph()
+        checks["imports"] = {"ok": True}
+    except Exception as exc:
+        checks["imports"] = {"ok": False, "detail": str(exc)}
+    identity_abi = verify_identity_abi()
+    reputation_abi = verify_reputation_abi()
+    checks["erc8004_abis"] = {"ok": identity_abi["ok"] and reputation_abi["ok"], "detail": {"identity": identity_abi["missing"], "reputation": reputation_abi["missing"]}}
+    try:
+        parse_strategy_yaml(initial_strategy_yaml("red-a", ["PF_TESTX_PERP"]))
+        checks["strategy_schema"] = {"ok": True}
+    except Exception as exc:
+        checks["strategy_schema"] = {"ok": False, "detail": str(exc)}
+    return {"ok": all(check["ok"] for check in checks.values()), "checks": checks}
 
 
 @app.command()

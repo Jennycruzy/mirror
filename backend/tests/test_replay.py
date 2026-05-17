@@ -42,4 +42,6 @@ def test_replay_strategy_uses_threshold_for_trade_rate():
     assert result.sample_size == 2
     assert result.trade_count == 1
     assert result.trade_rate == 0.5
-
+    assert result.realized_pnl_usd == 0.05
+    assert result.max_drawdown_usd == 0
+    assert result.win_rate == 1.0

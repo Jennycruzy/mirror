@@ -16,6 +16,7 @@ from mirror.clients.gemini import GeminiClient
 from mirror.config import Settings
 from mirror.errors import PatchValidationFailed
 from mirror.models import Agent, BlueFinding, Event, Forecast, Patch
+from mirror.tournament.gate import evaluate_tournament_gate
 
 
 PATCHER_PROMPT = """You are MIRROR Strategy Patcher.
@@ -76,6 +77,26 @@ async def propose_patch_for_finding(session: AsyncSession, settings: Settings, f
     pre = replay_strategy(agent.strategy_yaml, list(recent_forecasts))
     post = replay_strategy(patched_strategy.to_yaml(), list(recent_forecasts))
     gate = evaluate_holdout_gate(pre.brier, post.brier, pre.trade_rate, post.trade_rate)
+    gate_passed = gate.passed
+    rejection_reason = gate.rejection_reason
+    tournament_gate_payload = None
+    if settings.mirror_mode == "tournament":
+        tournament_gate = evaluate_tournament_gate(
+            pre,
+            post,
+            min_pnl_improvement_pct=settings.tournament_min_pnl_improvement_pct,
+            max_drawdown_worsening_pct=settings.tournament_max_drawdown_worsening_pct,
+            max_brier_degradation_pct=settings.tournament_max_brier_degradation_pct,
+        )
+        tournament_gate_payload = {
+            "pnl_improvement_pct": tournament_gate.pnl_improvement_pct,
+            "drawdown_change_pct": tournament_gate.drawdown_change_pct,
+            "brier_change_pct": tournament_gate.brier_change_pct,
+            "passed": tournament_gate.passed,
+        }
+        gate_passed = gate_passed and tournament_gate.passed
+        if tournament_gate.rejection_reason:
+            rejection_reason = "; ".join(reason for reason in [rejection_reason, tournament_gate.rejection_reason] if reason)
     patch_hash = compute_patch_hash(agent.id, proposal.model_dump(), agent.strategy_hash)
     patch = Patch(
         source_agent_id=agent.id,
@@ -93,14 +114,14 @@ async def propose_patch_for_finding(session: AsyncSession, settings: Settings, f
         holdout_post_trade_rate=post.trade_rate,
         brier_improvement_pct=gate.brier_improvement_pct,
         trade_rate_preservation_pct=gate.trade_rate_preservation_pct,
-        gate_passed=gate.passed,
-        rejection_reason=gate.rejection_reason,
-        status="accepted" if gate.passed else "rejected",
+        gate_passed=gate_passed,
+        rejection_reason=rejection_reason,
+        status="accepted" if gate_passed else "rejected",
     )
     session.add(patch)
     await session.flush()
 
-    if gate.passed:
+    if gate_passed:
         promoted = await promote_agent_from_patch(session, settings, agent, patch, patched_strategy, post.brier, post.trade_rate)
         patch.applied_agent_id = promoted.id
         patch.applied_at = datetime.now(UTC)
@@ -110,7 +131,14 @@ async def propose_patch_for_finding(session: AsyncSession, settings: Settings, f
                 agent_id=agent.id,
                 kind="patch_accepted",
                 severity="info",
-                payload_json={"patch_id": str(patch.id), "applied_agent_id": str(promoted.id), "brier_improvement_pct": gate.brier_improvement_pct},
+                payload_json={
+                    "patch_id": str(patch.id),
+                    "applied_agent_id": str(promoted.id),
+                    "brier_improvement_pct": gate.brier_improvement_pct,
+                    "holdout_pre_pnl_usd": pre.realized_pnl_usd,
+                    "holdout_post_pnl_usd": post.realized_pnl_usd,
+                    "tournament_gate": tournament_gate_payload,
+                },
             )
         )
         from mirror.agents.crossover import attempt_crossovers_for_accepted_patch
@@ -123,7 +151,13 @@ async def propose_patch_for_finding(session: AsyncSession, settings: Settings, f
                 agent_id=agent.id,
                 kind="patch_rejected",
                 severity="warning",
-                payload_json={"patch_id": str(patch.id), "reason": gate.rejection_reason},
+                payload_json={
+                    "patch_id": str(patch.id),
+                    "reason": rejection_reason,
+                    "holdout_pre_pnl_usd": pre.realized_pnl_usd,
+                    "holdout_post_pnl_usd": post.realized_pnl_usd,
+                    "tournament_gate": tournament_gate_payload,
+                },
             )
         )
     await session.commit()
@@ -249,6 +283,11 @@ def mutable_field_ranges() -> dict[str, str]:
         "momentum_lookback_minutes": "15 to 1440",
         "mean_reversion_zscore_entry": "0.5 to 5.0",
         "news_signal_required": "boolean",
+        "tournament_min_expected_move_bps": "0 to 500",
+        "tournament_max_spread_bps": "0 to 500",
+        "tournament_profit_lock_bps": "0 to 1000",
+        "tournament_trailing_stop_bps": "0 to 1000",
+        "tournament_cooldown_minutes_after_loss": "0 to 1440",
     }
 
 

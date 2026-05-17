@@ -1,6 +1,6 @@
 # External Interface Verification
 
-Verification performed on 2026-05-16.
+Verification performed on 2026-05-16 and refreshed on 2026-05-17.
 
 ## Kraken CLI
 
@@ -10,7 +10,14 @@ Verified from the canonical repository listing:
 
 - Install command: `cargo install --git https://github.com/krakenfx/kraken-cli`
 - Ticker command surfaced by docs: `kraken futures tickers`
-- JSON mode must still be verified locally with `kraken --help` because this environment does not have `kraken` installed.
+- Futures paper status: `kraken futures paper status -o json`
+- Futures paper balance: `kraken futures paper balance -o json`
+- Futures paper initialization: `kraken futures paper init -o json`
+- Futures paper market buy: `kraken futures paper buy <SYM> <SIZE> --leverage <L> --type market --client-order-id <ID> -o json`
+- Futures paper market sell: `kraken futures paper sell <SYM> <SIZE> --leverage <L> --type market --client-order-id <ID> -o json`
+- Successful futures paper JSON responses include `mode: "futures_paper"`.
+- Verified on the VPS on 2026-05-17 with `kraken --help`, `kraken futures --help`, `kraken futures paper --help`, and live `kraken futures tickers -o json`.
+- Verified xStock futures paper symbols include `PF_AAPLXUSD`, `PF_NVDAXUSD`, `PF_QQQXUSD`, `PF_SPYXUSD`, and `PF_TSLAXUSD`.
 
 ## ERC-8004
 

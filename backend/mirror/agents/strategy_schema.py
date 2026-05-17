@@ -37,6 +37,11 @@ class MutableStrategy(BaseModel):
     momentum_lookback_minutes: int = Field(ge=15, le=1440)
     mean_reversion_zscore_entry: float = Field(ge=0.5, le=5.0)
     news_signal_required: bool
+    tournament_min_expected_move_bps: float = Field(default=20.0, ge=0, le=500)
+    tournament_max_spread_bps: float = Field(default=35.0, ge=0, le=500)
+    tournament_profit_lock_bps: float = Field(default=60.0, ge=0, le=1000)
+    tournament_trailing_stop_bps: float = Field(default=35.0, ge=0, le=1000)
+    tournament_cooldown_minutes_after_loss: int = Field(default=20, ge=0, le=1440)
 
 
 class Strategy(BaseModel):
@@ -140,4 +145,3 @@ def initial_strategy_yaml(lineage: str, tickers: list[str] | None = None) -> str
         mutable=MutableStrategy.model_validate(preset["mutable"]),
     )
     return strategy.to_yaml()
-

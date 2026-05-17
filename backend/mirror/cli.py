@@ -12,6 +12,7 @@ from mirror.agents.blue import run_blue_scan
 from mirror.agents.crossover import attempt_crossovers_for_patch
 from mirror.agents.patcher import propose_patch_for_finding
 from mirror.agents.strategy_schema import initial_strategy_yaml, parse_strategy_yaml
+from mirror.backtest.replay import replay_strategy
 from mirror.chain.identity import execute_registration_job, queue_or_register_agent, verify_identity_abi
 from mirror.chain.reputation import execute_brier_feedback_job, verify_reputation_abi
 from mirror.clients.chain import ChainClient
@@ -24,10 +25,11 @@ from mirror.logging import configure_logging
 from mirror.models import Agent, BlueFinding, Event, Forecast, OnchainJob, Patch, Trade
 from mirror.orchestrator.resolution import build_resolution_graph
 from mirror.orchestrator.schedule import build_scheduler
+from mirror.tournament.exits import manage_tournament_exits
 
 app = typer.Typer(no_args_is_help=True)
-init_app = typer.Typer(no_args_is_help=True)
-run_app = typer.Typer(no_args_is_help=True)
+init_app = typer.Typer(no_args_is_help=False)
+run_app = typer.Typer(no_args_is_help=False)
 onchain_app = typer.Typer(no_args_is_help=True)
 app.add_typer(init_app, name="init")
 app.add_typer(run_app, name="run")
@@ -188,10 +190,13 @@ async def _discover_symbols(assign: bool) -> list[str]:
 
 @run_app.callback(invoke_without_command=True)
 def run_root(
+    ctx: typer.Context,
     once: Annotated[bool, typer.Option("--once")] = False,
     agent: Annotated[str, typer.Option("--agent")] = "red-a",
     scheduler: Annotated[bool, typer.Option("--scheduler")] = False,
 ) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
     if once:
         forecast = run_async(_run_once(agent))
         typer.echo(json.dumps({"forecast_id": str(forecast.id), "agent_id": str(forecast.agent_id)}, indent=2))
@@ -234,12 +239,24 @@ async def _blue_scan(agent: str):
         return await run_blue_scan(session, get_settings(), agent)
 
 
+@run_app.command("exits")
+def run_exits_once() -> None:
+    closed_count = run_async(_run_exits_once())
+    typer.echo(json.dumps({"closed_count": closed_count}, indent=2))
+
+
+async def _run_exits_once() -> int:
+    async with SessionLocal() as session:
+        return await manage_tournament_exits(session, get_settings())
+
+
 @app.command()
 def status() -> None:
     typer.echo(json.dumps(run_async(_status()), indent=2, default=str))
 
 
 async def _status() -> dict:
+    settings = get_settings()
     try:
         async with SessionLocal() as session:
             forecasts = await session.scalar(select(func.count()).select_from(Forecast))
@@ -254,6 +271,7 @@ async def _status() -> dict:
         return {
             "scheduler": "unknown",
             "generated_at": datetime.now(UTC).isoformat(),
+            "mode": settings.mirror_mode,
             "database": {"ok": False, "detail": str(exc)},
             "api_health": "unavailable until Postgres is reachable",
             "sse_health": "unavailable until Postgres is reachable",
@@ -261,6 +279,14 @@ async def _status() -> dict:
     return {
         "scheduler": "stopped",
         "generated_at": datetime.now(UTC).isoformat(),
+        "mode": settings.mirror_mode,
+        "tournament": {
+            "objective": settings.tournament_objective,
+            "max_daily_drawdown_pct": settings.tournament_max_daily_drawdown_pct,
+            "max_position_risk_pct": settings.tournament_max_position_risk_pct,
+            "min_confidence": settings.tournament_min_confidence,
+            "max_concurrent_positions": settings.tournament_max_concurrent_positions,
+        },
         "database": {"ok": True},
         "agents": [{"id": str(a.id), "lineage": a.lineage, "version": a.version, "status": a.status} for a in agents],
         "total_forecasts": forecasts,
@@ -374,7 +400,42 @@ async def _smoke() -> dict:
 
 @app.command()
 def backtest(agent: Annotated[str, typer.Option("--agent")] = "red-a") -> None:
-    raise typer.Exit(f"Backtest for {agent} is implemented in Day 4 gate work.")
+    result = run_async(_backtest(agent))
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+async def _backtest(lineage: str) -> dict:
+    async with SessionLocal() as session:
+        agent = (
+            await session.execute(
+                select(Agent)
+                .where(Agent.lineage == lineage, Agent.status == "active")
+                .order_by(Agent.version.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if agent is None:
+            raise typer.Exit(f"No active agent found for lineage {lineage}")
+        forecasts = (
+            await session.execute(
+                select(Forecast)
+                .where(Forecast.agent_id == agent.id, Forecast.status == "resolved")
+                .order_by(Forecast.resolved_at.desc())
+                .limit(100)
+            )
+        ).scalars().all()
+        if not forecasts:
+            raise typer.Exit(f"No resolved forecasts available for {lineage}; run forecast and resolution cycles first.")
+        replay = replay_strategy(agent.strategy_yaml, list(forecasts))
+        return {
+            "agent_id": str(agent.id),
+            "lineage": agent.lineage,
+            "version": agent.version,
+            "sample_size": replay.sample_size,
+            "trade_count": replay.trade_count,
+            "brier": replay.brier,
+            "trade_rate": replay.trade_rate,
+        }
 
 
 @app.command()

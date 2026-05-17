@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "lint": "next lint"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@types/d3": "^7.4.3",
@@ -25,4 +25,3 @@
     "typescript": "^5.5.0"
   }
 }
-

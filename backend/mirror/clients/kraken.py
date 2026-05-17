@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,18 @@ class KrakenCommandResult:
     stdout: str
     stderr: str
     json_data: Any
+
+
+@dataclass(frozen=True)
+class KrakenTickerRecord:
+    symbol: str
+    pair: str | None
+    price: float
+    bid: float | None
+    ask: float | None
+    change24h: float | None
+    volume_quote: float | None
+    raw: dict[str, Any]
 
 
 class KrakenClient:
@@ -68,27 +81,25 @@ class KrakenClient:
         return output
 
     async def verify_paper_mode(self) -> dict[str, Any]:
-        candidates = [
-            ["futures", "accounts", "-o", "json"],
-            ["futures", "account", "-o", "json"],
-            ["paper", "futures", "accounts", "-o", "json"],
-        ]
-        last_error: Exception | None = None
-        for args in candidates:
-            try:
-                result = await self.run_json(args)
-                text = json.dumps(result.json_data).lower()
-                if "paper" not in text and self.settings.kraken_require_paper_mode:
-                    raise KrakenNotPaperMode("Kraken account response did not confirm paper mode")
-                return result.json_data
-            except (KrakenCliCommandFailed, KrakenNotPaperMode) as exc:
-                last_error = exc
-        raise KrakenNotPaperMode(f"Unable to verify Kraken paper mode: {last_error}")
+        try:
+            status = (await self.run_json(["futures", "paper", "status", "-o", "json"])).json_data
+        except KrakenCliCommandFailed:
+            init_response = await self.run_json(["futures", "paper", "init", "-o", "json"])
+            status = init_response.json_data
+
+        balance = (await self.run_json(["futures", "paper", "balance", "-o", "json"])).json_data
+        payload = {"status": status, "balance": balance}
+        text = json.dumps(payload).lower()
+        if self.settings.kraken_require_paper_mode and "paper" not in text:
+            raise KrakenNotPaperMode("Kraken futures paper status/balance did not confirm paper mode")
+        return payload
 
     async def discover_xstock_perp_symbols(self) -> list[str]:
         result = await self.run_json(["futures", "tickers", "-o", "json"])
-        symbols = extract_symbols(result.json_data)
-        xstock_symbols = [s for s in symbols if is_xstock_perp_symbol(s)]
+        xstock_symbols = extract_xstock_perp_symbols(result.json_data)
+        if len(xstock_symbols) < 3:
+            symbols = extract_symbols(result.json_data)
+            xstock_symbols = [s for s in symbols if is_xstock_perp_symbol(s)]
         if len(xstock_symbols) < 3:
             raise KrakenSymbolDiscoveryFailed(
                 f"Fewer than three xStock perpetual symbols discovered from Kraken output. Found: {xstock_symbols}"
@@ -102,17 +113,49 @@ class KrakenClient:
         size_usd: float,
         leverage: int,
         idempotency_key: str,
+        reduce_only: bool = False,
     ) -> dict[str, Any]:
+        if side not in {"buy", "sell"}:
+            raise KrakenCliCommandFailed(f"Invalid futures paper side: {side}")
+        if size_usd <= 0:
+            raise KrakenCliCommandFailed(f"Invalid futures paper size: {size_usd}")
+        if leverage < 1:
+            raise KrakenCliCommandFailed(f"Invalid futures paper leverage: {leverage}")
+
         await self.verify_paper_mode()
-        help_text = await self.help_text(["futures", "--help"])
-        if "order" not in help_text.lower():
-            raise KrakenCliCommandFailed(
-                "Kraken futures order command was not discoverable from local `kraken futures --help`; refusing to trade."
-            )
-        raise KrakenCliCommandFailed(
-            "Kraken paper futures order syntax must be verified from local help before enabling placement. "
-            "Run `kraken futures --help` and extend KrakenClient with the exact official command surface."
-        )
+        ticker_payload = (await self.run_json(["futures", "tickers", "-o", "json"])).json_data
+        price = extract_price_for_symbol(ticker_payload, symbol)
+        if price is None or price <= 0:
+            raise KrakenCliCommandFailed(f"Could not derive futures paper order size for {symbol}: ticker price unavailable")
+        size = size_usd / price
+        args = [
+            "futures",
+            "paper",
+            side,
+            symbol,
+            format_cli_number(size),
+            "--leverage",
+            str(leverage),
+            "--type",
+            "market",
+            "--client-order-id",
+            idempotency_key,
+            "-o",
+            "json",
+        ]
+        if reduce_only:
+            args.insert(-2, "--reduce-only")
+        result = await self.run_json(args)
+        text = json.dumps(result.json_data).lower()
+        if self.settings.kraken_require_paper_mode and "futures_paper" not in text and "paper" not in text:
+            raise KrakenNotPaperMode("Kraken order response did not confirm futures paper mode")
+        return result.json_data
+
+    async def futures_paper_balance(self) -> dict[str, Any]:
+        return (await self.run_json(["futures", "paper", "balance", "-o", "json"])).json_data
+
+    async def futures_tickers(self) -> dict[str, Any]:
+        return (await self.run_json(["futures", "tickers", "-o", "json"])).json_data
 
 
 def extract_symbols(payload: Any) -> list[str]:
@@ -128,6 +171,129 @@ def extract_symbols(payload: Any) -> list[str]:
     return symbols
 
 
+def extract_xstock_perp_symbols(payload: Any) -> list[str]:
+    symbols: list[str] = []
+    if isinstance(payload, dict):
+        symbol = payload.get("symbol")
+        pair = payload.get("pair")
+        if (
+            isinstance(symbol, str)
+            and isinstance(pair, str)
+            and symbol.startswith(("PF_", "PI_"))
+            and is_xstock_pair(pair)
+        ):
+            symbols.append(symbol)
+        for value in payload.values():
+            symbols.extend(extract_xstock_perp_symbols(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            symbols.extend(extract_xstock_perp_symbols(item))
+    return symbols
+
+
+def extract_xstock_ticker_records(payload: Any) -> list[KrakenTickerRecord]:
+    records: list[KrakenTickerRecord] = []
+    if isinstance(payload, dict):
+        symbol = payload.get("symbol")
+        pair = payload.get("pair")
+        if (
+            isinstance(symbol, str)
+            and isinstance(pair, str)
+            and symbol.startswith(("PF_", "PI_"))
+            and is_xstock_pair(pair)
+        ):
+            price = first_float(payload, ("markPrice", "last", "indexPrice", "price"))
+            if price is not None and price > 0:
+                records.append(
+                    KrakenTickerRecord(
+                        symbol=symbol,
+                        pair=pair,
+                        price=price,
+                        bid=parse_float(payload.get("bid")),
+                        ask=parse_float(payload.get("ask")),
+                        change24h=parse_float(payload.get("change24h")),
+                        volume_quote=parse_float(payload.get("volumeQuote")),
+                        raw=payload,
+                    )
+                )
+        for value in payload.values():
+            records.extend(extract_xstock_ticker_records(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            records.extend(extract_xstock_ticker_records(item))
+    return records
+
+
+def select_best_xstock_record(payload: Any, allowed_symbols: list[str]) -> KrakenTickerRecord | None:
+    allowed = set(allowed_symbols)
+    candidates = [record for record in extract_xstock_ticker_records(payload) if record.symbol in allowed]
+    candidates = [record for record in candidates if record.ask is None or record.bid is None or record.ask >= record.bid]
+    if not candidates:
+        return None
+    return max(candidates, key=tournament_opportunity_score)
+
+
+def tournament_opportunity_score(record: KrakenTickerRecord) -> float:
+    change = abs(record.change24h or 0.0)
+    volume = max(record.volume_quote or 0.0, 1.0)
+    spread_bps = 25.0
+    if record.bid and record.ask and record.price:
+        spread_bps = max(((record.ask - record.bid) / record.price) * 10000.0, 1.0)
+    return change * (volume ** 0.25) / spread_bps
+
+
+def is_xstock_pair(pair: str) -> bool:
+    base = pair.split(":", 1)[0]
+    return base.endswith("x") and len(base) > 1 and base[:-1].isalnum()
+
+
 def is_xstock_perp_symbol(symbol: str) -> bool:
     s = symbol.upper()
-    return ("XSTOCK" in s or s.endswith("X") or ".X" in s) and ("PERP" in s or "PF_" in s or "PI_" in s)
+    return (
+        ("XSTOCK" in s or s.endswith("X") or ".X" in s or re.match(r"^PF_[A-Z0-9]+XUSD$", s) is not None)
+        and ("PERP" in s or s.startswith("PF_") or s.startswith("PI_"))
+    )
+
+
+def extract_price_for_symbol(payload: Any, symbol: str) -> float | None:
+    if isinstance(payload, dict):
+        symbol_matches = any(isinstance(v, str) and v == symbol for v in payload.values())
+        if symbol_matches:
+            for key in ("price", "last", "markPrice", "mark_price", "lastPrice", "last_price"):
+                value = payload.get(key)
+                parsed = parse_float(value)
+                if parsed is not None:
+                    return parsed
+        for value in payload.values():
+            found = extract_price_for_symbol(value, symbol)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = extract_price_for_symbol(item, symbol)
+            if found is not None:
+                return found
+    return None
+
+
+def parse_float(value: Any) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def first_float(payload: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        parsed = parse_float(payload.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def format_cli_number(value: float) -> str:
+    return f"{value:.8f}".rstrip("0").rstrip(".")

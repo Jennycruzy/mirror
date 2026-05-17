@@ -18,7 +18,14 @@ RED_FORECAST_SYSTEM_PROMPT = """You are a MIRROR Red trading agent.
 Return strict JSON only. Do not include markdown.
 Allowed predicted_direction values: long, short, flat.
 Use the provided strategy and real Kraken market ticker data.
-If confidence is below strategy threshold, set will_trade=false.
+If confidence is below strategy threshold, set will_trade=false unless scout_mode_enabled is true and the setup has a directional edge.
+For scout trades, keep position_size_usd near scout_size_usd and use conservative leverage.
+Required JSON keys:
+predicted_direction, predicted_magnitude_bps, confidence, time_horizon_minutes,
+regime_tags, will_trade, position_size_usd, leverage, stop_loss_pct,
+take_profit_pct, reasoning.
+For flat/abstain, use confidence=0.5, position_size_usd=0, leverage=1,
+stop_loss_pct=0, take_profit_pct=0, and explain in reasoning.
 """
 
 
@@ -62,7 +69,8 @@ async def run_red_once_legacy(session: AsyncSession, settings: Settings, lineage
 
     kraken = KrakenClient(settings)
     ticker_payload = (await kraken.run_json(["futures", "tickers", "-o", "json"])).json_data
-    price = extract_price_for_symbol(ticker_payload, ticker)
+    selected_ticker = extract_record_for_symbol(ticker_payload, ticker) or {}
+    price = extract_price_for_symbol(selected_ticker or ticker_payload, ticker)
     if price is None:
         raise RuntimeError(f"Could not extract a real price for discovered symbol {ticker} from Kraken ticker output")
     tick = MarketTick(ticker=ticker, price=price, raw_ticker=ticker_payload, observed_at=datetime.now(UTC))
@@ -76,7 +84,7 @@ async def run_red_once_legacy(session: AsyncSession, settings: Settings, lineage
                 "Strategy YAML:\n"
                 f"{agent.strategy_yaml}\n\n"
                 "Kraken ticker JSON:\n"
-                f"{ticker_payload}\n\n"
+                f"{selected_ticker}\n\n"
                 "Return the Red Forecast JSON schema exactly."
             ),
         },
@@ -196,3 +204,19 @@ def extract_price_for_symbol(payload: Any, symbol: str) -> float | None:
             if found is not None:
                 return found
     return candidates[0] if candidates else None
+
+
+def extract_record_for_symbol(payload: Any, symbol: str) -> dict[str, Any] | None:
+    if isinstance(payload, dict):
+        if any(isinstance(v, str) and v == symbol for v in payload.values()):
+            return payload
+        for value in payload.values():
+            found = extract_record_for_symbol(value, symbol)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = extract_record_for_symbol(item, symbol)
+            if found is not None:
+                return found
+    return None

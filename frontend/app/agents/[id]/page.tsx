@@ -1,7 +1,6 @@
 import { BrierTimeline } from "../../../components/BrierTimeline";
 import { CalibrationCurve } from "../../../components/CalibrationCurve";
 import { LangGraphView } from "../../../components/LangGraphView";
-import { PositionTable } from "../../../components/PositionTable";
 
 export default function AgentPage({ params }: { params: { id: string } }) {
   return (
@@ -17,7 +16,6 @@ export default function AgentPage({ params }: { params: { id: string } }) {
       </div>
       <div className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <LangGraphView />
-        <PositionTable />
       </div>
     </main>
   );

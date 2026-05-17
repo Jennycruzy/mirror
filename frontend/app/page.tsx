@@ -1,6 +1,6 @@
 import { DashboardShell } from "../components/DashboardShell";
 import { fetchJson } from "../lib/api";
-import type { Agent, BlueFinding, Forecast, OnchainJob, PatchRecord } from "../lib/types";
+import type { Agent, BlueFinding, Forecast, OnchainJob, PaperStatus, PatchRecord, Trade } from "../lib/types";
 
 export default async function HomePage() {
   let agents: Agent[] = [];
@@ -8,18 +8,22 @@ export default async function HomePage() {
   let blueFindings: BlueFinding[] = [];
   let onchainJobs: OnchainJob[] = [];
   let patches: PatchRecord[] = [];
+  let trades: Trade[] = [];
+  let paperStatus: PaperStatus | null = null;
   let error: string | null = null;
   try {
-    [agents, forecasts, blueFindings, onchainJobs, patches] = await Promise.all([
+    [agents, forecasts, blueFindings, onchainJobs, patches, trades, paperStatus] = await Promise.all([
       fetchJson<Agent[]>("/agents"),
       fetchJson<Forecast[]>("/forecasts"),
       fetchJson<BlueFinding[]>("/blue-findings"),
       fetchJson<OnchainJob[]>("/onchain-jobs"),
-      fetchJson<PatchRecord[]>("/patches")
+      fetchJson<PatchRecord[]>("/patches"),
+      fetchJson<Trade[]>("/trades"),
+      fetchJson<PaperStatus>("/trades/paper-status")
     ]);
   } catch (err) {
     error = err instanceof Error ? err.message : "Backend unavailable";
   }
 
-  return <DashboardShell initialData={{ agents, forecasts, blueFindings, onchainJobs, patches }} initialError={error} />;
+  return <DashboardShell initialData={{ agents, forecasts, blueFindings, onchainJobs, patches, trades, paperStatus }} initialError={error} />;
 }

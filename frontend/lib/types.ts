@@ -46,6 +46,51 @@ export type Forecast = {
   brier_score?: number | null;
 };
 
+export type Trade = {
+  id: string;
+  agent_id: string;
+  forecast_id: string;
+  ticker: string;
+  side: "buy" | "sell";
+  mode: string;
+  size_usd: number;
+  leverage: number;
+  status: string;
+  kraken_order_id?: string | null;
+  opened_at?: string | null;
+  closed_at?: string | null;
+  entry_price?: number | null;
+  exit_price?: number | null;
+  realized_pnl_usd?: number | null;
+};
+
+export type PaperStatus = {
+  status: {
+    collateral?: number;
+    equity?: number;
+    pnl?: number;
+    pnl_pct?: number;
+    unrealized_pnl?: number;
+    positions?: number;
+    total_fills?: number;
+    mode?: string;
+  };
+  positions: {
+    count?: number;
+    mode?: string;
+    positions?: Array<{
+      symbol: string;
+      side: string;
+      size: number;
+      entry_price: number;
+      mark_price: number;
+      leverage: number;
+      unrealized_pnl: number;
+      liquidation_price?: number;
+    }>;
+  };
+};
+
 export type CalibrationBucket = {
   lower: number;
   upper: number;

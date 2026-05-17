@@ -5,9 +5,10 @@ import { ActivityFeed } from "./ActivityFeed";
 import { BattalionGrid } from "./BattalionGrid";
 import { BlueFindingsPanel } from "./BlueFindingsPanel";
 import { OnchainQueue } from "./OnchainQueue";
+import { PositionTable } from "./PositionTable";
 import { fetchJson } from "../lib/api";
 import { openMirrorStream } from "../lib/sse";
-import type { Agent, BlueFinding, Forecast, MirrorEvent, OnchainJob, PatchRecord } from "../lib/types";
+import type { Agent, BlueFinding, Forecast, MirrorEvent, OnchainJob, PaperStatus, PatchRecord, Trade } from "../lib/types";
 
 type DashboardData = {
   agents: Agent[];
@@ -15,6 +16,8 @@ type DashboardData = {
   blueFindings: BlueFinding[];
   onchainJobs: OnchainJob[];
   patches: PatchRecord[];
+  trades: Trade[];
+  paperStatus: PaperStatus | null;
 };
 
 export function DashboardShell({ initialData, initialError }: { initialData: DashboardData; initialError: string | null }) {
@@ -25,14 +28,16 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
 
   const refresh = useCallback(async () => {
     try {
-      const [agents, forecasts, blueFindings, onchainJobs, patches] = await Promise.all([
+      const [agents, forecasts, blueFindings, onchainJobs, patches, trades, paperStatus] = await Promise.all([
         fetchJson<Agent[]>("/agents"),
         fetchJson<Forecast[]>("/forecasts"),
         fetchJson<BlueFinding[]>("/blue-findings"),
         fetchJson<OnchainJob[]>("/onchain-jobs"),
-        fetchJson<PatchRecord[]>("/patches")
+        fetchJson<PatchRecord[]>("/patches"),
+        fetchJson<Trade[]>("/trades"),
+        fetchJson<PaperStatus>("/trades/paper-status")
       ]);
-      setData({ agents, forecasts, blueFindings, onchainJobs, patches });
+      setData({ agents, forecasts, blueFindings, onchainJobs, patches, trades, paperStatus });
       setLastUpdated(new Date().toLocaleTimeString());
       setError(null);
     } catch (err) {
@@ -60,6 +65,8 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
   const patchesPassed = data.patches.filter((patch) => patch.gate_passed).length;
   const patchesRejected = data.patches.filter((patch) => patch.status === "rejected").length;
   const crossovers = data.patches.filter((patch) => patch.patch_type === "crossover").length;
+  const paperPnl = data.paperStatus?.status?.pnl;
+  const paperEquity = data.paperStatus?.status?.equity;
 
   return (
     <main className="relative min-h-screen overflow-hidden px-5 py-6 lg:px-10">
@@ -81,14 +88,19 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
 
       <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <Stat label="Forecasts" value={data.forecasts.length} note="total returned" />
+        <Stat label="Paper PnL" value={money(paperPnl)} note="realized + unrealized" tone={(paperPnl ?? 0) >= 0 ? "good" : "bad"} />
+        <Stat label="Equity" value={money(paperEquity)} note="Kraken paper" />
         <Stat label="Trades Today" value={totalTrades} note="paper only" />
         <Stat label="Patches Passed" value={patchesPassed} note="holdout gate" />
         <Stat label="Patches Rejected" value={patchesRejected} note="with reasons" />
         <Stat label="Crossovers" value={crossovers} note="horizontal lineage" />
-        <Stat label="Next Event" value="scheduler" note="30m / 1m / 4h" />
       </section>
 
       <BattalionGrid agents={data.agents} />
+
+      <div className="mt-6">
+        <PositionTable paperStatus={data.paperStatus} trades={data.trades} />
+      </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <BlueFindingsPanel findings={data.blueFindings} />
@@ -102,14 +114,19 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
   );
 }
 
-function Stat({ label, value, note }: { label: string; value: string | number; note: string }) {
+function Stat({ label, value, note, tone }: { label: string; value: string | number; note: string; tone?: "good" | "bad" }) {
+  const valueClass = tone === "good" ? "text-teal-300" : tone === "bad" ? "text-rose-300" : "text-slate-50";
   return (
     <div className="group rounded-3xl border border-slate-800/90 bg-slate-950/60 p-5 shadow-xl backdrop-blur transition duration-300 hover:-translate-y-1 hover:border-amber-300/50">
       <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{label}</p>
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-50">{value}</p>
+      <p className={`mt-3 text-3xl font-semibold tracking-tight ${valueClass}`}>{value}</p>
       <p className="mt-2 text-xs text-slate-500">{note}</p>
     </div>
   );
+}
+
+function money(value: number | null | undefined) {
+  return value === null || value === undefined ? "n/a" : `$${value.toFixed(2)}`;
 }
 
 function safeEvent(data: string): MirrorEvent {

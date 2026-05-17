@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     web3_storage_token: str | None = None
     public_app_url: str = "http://localhost:3000"
     backend_public_url: str = "http://localhost:8000"
+    cors_origins: str = "http://localhost:3000,http://localhost:3010"
     trading_enabled: bool = False
     onchain_enabled: bool = False
     mirror_mode: str = "calibration"

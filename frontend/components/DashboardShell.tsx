@@ -46,6 +46,8 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
   }, []);
 
   useEffect(() => {
+    void refresh();
+    const refreshInterval = window.setInterval(() => void refresh(), 15000);
     const source = openMirrorStream();
     source.onmessage = (event) => {
       const parsed = safeEvent(event.data);
@@ -58,7 +60,10 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
     source.onerror = () => {
       setEvents((current) => [{ kind: "sse_connection_error", severity: "error" }, ...current].slice(0, 40));
     };
-    return () => source.close();
+    return () => {
+      window.clearInterval(refreshInterval);
+      source.close();
+    };
   }, [refresh]);
 
   const totalTrades = data.agents.reduce((sum, agent) => sum + (agent.trades_today ?? 0), 0);

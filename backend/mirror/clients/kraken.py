@@ -296,7 +296,7 @@ class KrakenClient:
 
     async def trading_status(self) -> dict[str, Any]:
         if self.settings.kraken_execution_mode == "account":
-            return normalize_account_status(await self.verify_execution_mode())
+            return normalize_account_status(await self.verify_execution_mode(), baseline_equity=self.settings.tournament_account_equity_usd)
         if self.settings.kraken_execution_mode == "spot_paper":
             status = (await self.run_json(["paper", "status", "-o", "json"])).json_data
             balance = (await self.run_json(["paper", "balance", "-o", "json"])).json_data
@@ -439,7 +439,7 @@ def extract_price_for_symbol(payload: Any, symbol: str) -> float | None:
     return None
 
 
-def normalize_account_status(payload: dict[str, Any]) -> dict[str, Any]:
+def normalize_account_status(payload: dict[str, Any], baseline_equity: float | None = None) -> dict[str, Any]:
     accounts = payload.get("accounts") if isinstance(payload, dict) else {}
     positions = payload.get("positions") if isinstance(payload, dict) else {}
     flex = first_dict(accounts, ("flex", "futures", "account"))
@@ -447,6 +447,9 @@ def normalize_account_status(payload: dict[str, Any]) -> dict[str, Any]:
     source = flex or cash or {}
     equity = first_float(source, ("portfolioValue", "marginEquity", "equity", "currentValue", "balance"))
     pnl = first_float(source, ("totalUnrealized", "unrealizedPnl", "pnl", "profitLoss"))
+    raw_unrealized_pnl = pnl
+    if equity is not None and baseline_equity:
+        pnl = equity - baseline_equity
     available_margin = first_float(source, ("availableMargin", "available", "availableBalance"))
     collateral = first_float(source, ("collateralValue", "collateral", "marginBalance"))
     normalized_positions = extract_account_positions(positions)
@@ -458,7 +461,7 @@ def normalize_account_status(payload: dict[str, Any]) -> dict[str, Any]:
             "equity": equity,
             "current_value": equity,
             "pnl": pnl,
-            "unrealized_pnl": pnl,
+            "unrealized_pnl": raw_unrealized_pnl,
             "available_margin": available_margin,
             "collateral": collateral,
             "open_positions": len(normalized_positions),

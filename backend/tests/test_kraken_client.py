@@ -188,10 +188,11 @@ def test_normalize_account_status_extracts_flex_equity_and_positions():
         "positions": {"openPositions": [{"symbol": "PI_XBTUSD"}]},
     }
 
-    normalized = normalize_account_status(payload)
+    normalized = normalize_account_status(payload, baseline_equity=20600.0)
 
     assert normalized["status"]["equity"] == 20655.67
-    assert normalized["status"]["pnl"] == -12.34
+    assert round(normalized["status"]["pnl"], 2) == 55.67
+    assert normalized["status"]["unrealized_pnl"] == -12.34
     assert normalized["status"]["available_margin"] == 20000.0
     assert normalized["positions"]["positions"] == [{"symbol": "PI_XBTUSD"}]
 

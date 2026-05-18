@@ -42,18 +42,20 @@ class KrakenClient:
 
     async def run_json(self, args: list[str], timeout: float | None = None) -> KrakenCommandResult:
         self.ensure_installed()
-        full_args = [self.settings.kraken_cli_path, *args]
+        full_args = [self.settings.kraken_cli_path, *self._with_cli_overrides(args)]
         display_args = redact_args(full_args)
         env = self._subprocess_env()
+        stdin_payload = self._stdin_secret_for(args)
         proc = await asyncio.create_subprocess_exec(
             *full_args,
+            stdin=asyncio.subprocess.PIPE if stdin_payload is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(),
+                proc.communicate(stdin_payload.encode("utf-8") if stdin_payload is not None else None),
                 timeout=timeout or self.settings.kraken_timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
@@ -69,6 +71,23 @@ class KrakenClient:
         except json.JSONDecodeError as exc:
             raise KrakenCliCommandFailed(f"Kraken CLI did not return strict JSON for: {' '.join(display_args)}") from exc
         return KrakenCommandResult(args=full_args, stdout=stdout, stderr=stderr, json_data=data)
+
+    def _with_cli_overrides(self, args: list[str]) -> list[str]:
+        updated = list(args)
+        if not updated or updated[0] != "futures":
+            return updated
+        if self.settings.kraken_futures_url and "--futures-url" not in updated:
+            updated.extend(["--futures-url", self.settings.kraken_futures_url])
+        if self.settings.kraken_api_key and "--api-key" not in updated:
+            updated.extend(["--api-key", self.settings.kraken_api_key])
+        if self.settings.kraken_api_secret and "--api-secret-stdin" not in updated and "--api-secret" not in updated:
+            updated.append("--api-secret-stdin")
+        return updated
+
+    def _stdin_secret_for(self, args: list[str]) -> str | None:
+        if args and args[0] == "futures" and self.settings.kraken_api_secret:
+            return self.settings.kraken_api_secret
+        return None
 
     def _subprocess_env(self) -> dict[str, str]:
         env = os.environ.copy()

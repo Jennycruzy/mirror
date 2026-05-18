@@ -5,6 +5,7 @@ import { ActivityFeed } from "./ActivityFeed";
 import { BattalionGrid } from "./BattalionGrid";
 import { BlueFindingsPanel } from "./BlueFindingsPanel";
 import { OnchainQueue } from "./OnchainQueue";
+import { PatchQueuePanel } from "./PatchQueuePanel";
 import { PositionTable } from "./PositionTable";
 import { fetchJson } from "../lib/api";
 import { openMirrorStream } from "../lib/sse";
@@ -18,26 +19,29 @@ type DashboardData = {
   patches: PatchRecord[];
   trades: Trade[];
   paperStatus: PaperStatus | null;
+  events: MirrorEvent[];
 };
 
 export function DashboardShell({ initialData, initialError }: { initialData: DashboardData; initialError: string | null }) {
   const [data, setData] = useState(initialData);
-  const [events, setEvents] = useState<MirrorEvent[]>([]);
+  const [events, setEvents] = useState<MirrorEvent[]>(initialData.events);
   const [error, setError] = useState(initialError);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [agents, forecasts, blueFindings, onchainJobs, patches, trades, paperStatus] = await Promise.all([
+      const [agents, forecasts, blueFindings, onchainJobs, patches, trades, paperStatus, persistedEvents] = await Promise.all([
         fetchJson<Agent[]>("/agents"),
         fetchJson<Forecast[]>("/forecasts"),
         fetchJson<BlueFinding[]>("/blue-findings"),
         fetchJson<OnchainJob[]>("/onchain-jobs"),
         fetchJson<PatchRecord[]>("/patches"),
         fetchJson<Trade[]>("/trades"),
-        fetchJson<PaperStatus>("/trades/paper-status")
+        fetchJson<PaperStatus>("/trades/paper-status"),
+        fetchJson<MirrorEvent[]>("/events?limit=80")
       ]);
-      setData({ agents, forecasts, blueFindings, onchainJobs, patches, trades, paperStatus });
+      setData({ agents, forecasts, blueFindings, onchainJobs, patches, trades, paperStatus, events: persistedEvents });
+      setEvents((current) => mergeEvents(current, persistedEvents));
       setLastUpdated(new Date().toLocaleTimeString());
       setError(null);
     } catch (err) {
@@ -113,6 +117,7 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
         <aside className="space-y-4">
           <ActivityFeed events={events} />
           <BlueFindingsPanel findings={data.blueFindings} />
+          <PatchQueuePanel patches={data.patches} />
           <OnchainQueue jobs={data.onchainJobs} />
         </aside>
       </section>
@@ -140,4 +145,18 @@ function safeEvent(data: string): MirrorEvent {
   } catch {
     return { kind: data };
   }
+}
+
+function mergeEvents(current: MirrorEvent[], incoming: MirrorEvent[]) {
+  const merged = [...current, ...incoming];
+  const seen = new Set<string>();
+  return merged
+    .filter((event) => {
+      const key = event.id ?? `${event.kind}-${event.created_at ?? ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => Date.parse(b.created_at ?? "0") - Date.parse(a.created_at ?? "0"))
+    .slice(0, 80);
 }

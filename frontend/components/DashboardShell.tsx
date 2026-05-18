@@ -51,11 +51,11 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
     const source = openMirrorStream();
     source.onmessage = (event) => {
       const parsed = safeEvent(event.data);
-      setEvents((current) => [parsed, ...current].slice(0, 40));
+      if (parsed.kind !== "heartbeat") setEvents((current) => [parsed, ...current].slice(0, 40));
       if (parsed.kind !== "heartbeat") void refresh();
     };
-    source.addEventListener("heartbeat", (event) => {
-      setEvents((current) => [safeEvent((event as MessageEvent).data), ...current].slice(0, 40));
+    source.addEventListener("heartbeat", () => {
+      setLastUpdated(new Date().toLocaleTimeString());
     });
     source.onerror = () => {
       setEvents((current) => [{ kind: "sse_connection_error", severity: "error" }, ...current].slice(0, 40));

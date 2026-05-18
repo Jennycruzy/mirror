@@ -2,15 +2,20 @@ import type { OnchainJob } from "../lib/types";
 
 export function OnchainQueue({ jobs }: { jobs: OnchainJob[] }) {
   return (
-    <section className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-2xl backdrop-blur">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-100">On-Chain Queue</h2>
-        <span className="rounded-full bg-slate-900 px-3 py-1 text-xs text-slate-500">Base Sepolia</span>
+    <section className="border border-slate-800 bg-slate-950">
+      <div className="flex items-center justify-between border-b border-slate-800 p-4">
+        <h2 className="font-mono text-lg font-semibold text-slate-100">Patch & Identity Queue</h2>
+        <span className="bg-slate-900 px-3 py-1 text-xs uppercase tracking-[0.16em] text-slate-500">ERC-8004</span>
       </div>
-      {jobs.length === 0 ? <p className="mt-4 text-slate-500">No on-chain jobs queued.</p> : null}
-      <div className="mt-4 space-y-3">
+      {jobs.length === 0 ? (
+        <div className="p-4 text-sm text-slate-500">
+          <p className="text-slate-300">No promoted strategy versions queued.</p>
+          <p className="mt-2">Accepted patches mint new agent identities and post calibration reputation when on-chain mode is enabled.</p>
+        </div>
+      ) : null}
+      <div className="space-y-3 p-4">
         {jobs.map((job) => (
-          <article key={job.id} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm">
+          <article key={job.id} className="border border-slate-800 bg-slate-900/60 p-4 text-sm">
             <div className="flex items-center justify-between">
               <span>{job.job_type}</span>
               <span className={statusClass(job.status)}>{job.status}</span>
@@ -25,7 +30,7 @@ export function OnchainQueue({ jobs }: { jobs: OnchainJob[] }) {
 }
 
 function statusClass(status: string) {
-  if (status === "confirmed") return "rounded-full bg-teal-500/10 px-2 py-1 text-xs text-teal-200";
-  if (status === "failed") return "rounded-full bg-rose-500/10 px-2 py-1 text-xs text-rose-200";
-  return "rounded-full bg-amber-500/10 px-2 py-1 text-xs text-amber-200";
+  if (status === "confirmed") return "bg-teal-500/10 px-2 py-1 text-xs text-teal-200";
+  if (status === "failed") return "bg-rose-500/10 px-2 py-1 text-xs text-rose-200";
+  return "bg-amber-500/10 px-2 py-1 text-xs text-amber-200";
 }

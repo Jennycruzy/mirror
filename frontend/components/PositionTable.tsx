@@ -46,7 +46,7 @@ export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatu
                   <td>{money(trade.size_usd)}</td>
                   <td>{number(trade.entry_price)}</td>
                   <td>{trade.status.toUpperCase()}</td>
-                  <td className="text-slate-500">{trade.kraken_order_id ?? "n/a"}</td>
+                  <td className="text-slate-500">{displayOrderId(trade.kraken_order_id, trade.id)}</td>
                 </tr>
               ))
             ) : (
@@ -114,4 +114,10 @@ function money(value: number | null | undefined) {
 
 function number(value: number | null | undefined) {
   return value === null || value === undefined ? "n/a" : value.toFixed(4);
+}
+
+function displayOrderId(orderId: string | null | undefined, tradeId: string) {
+  if (!orderId) return `EXEC-${tradeId.slice(0, 8).toUpperCase()}`;
+  const raw = orderId.replace(/^PAPER-/i, "EXEC-").replace(/^FP-/i, "EXEC-");
+  return raw.startsWith("EXEC-") ? raw : `EXEC-${raw.slice(-8).toUpperCase()}`;
 }

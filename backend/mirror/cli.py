@@ -257,13 +257,14 @@ async def _blue_scan(agent: str):
 
 @run_app.command("exits")
 def run_exits_once() -> None:
-    closed_count = run_async(_run_exits_once())
-    typer.echo(json.dumps({"closed_count": closed_count}, indent=2))
+    result = run_async(_run_exits_once())
+    typer.echo(json.dumps(result, indent=2))
 
 
-async def _run_exits_once() -> int:
+async def _run_exits_once() -> dict:
     async with SessionLocal() as session:
-        return await manage_tournament_exits(session, get_settings())
+        result = await manage_tournament_exits(session, get_settings())
+        return {"closed_count": result.closed_count, "degraded": result.degraded}
 
 
 @app.command()

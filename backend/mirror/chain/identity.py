@@ -42,6 +42,39 @@ async def queue_or_register_agent(session: AsyncSession, settings: Settings, age
     ).scalar_one_or_none()
     if existing:
         return existing
+    failed = (
+        await session.execute(
+            select(OnchainJob).where(
+                OnchainJob.job_type == "register_agent",
+                OnchainJob.agent_id == agent.id,
+                OnchainJob.status == "failed",
+            )
+        )
+    ).scalar_one_or_none()
+    if failed:
+        parent_token_id, crossover_parent_token_id = await load_parent_token_ids(session, agent)
+        failed.payload_json = build_agent_registration_payload(
+            settings,
+            agent,
+            token_id=None,
+            parent_token_id=parent_token_id,
+            crossover_parent_token_id=crossover_parent_token_id,
+        )
+        failed.status = "queued"
+        failed.last_error = None
+        failed.tx_hash = None
+        session.add(
+            Event(
+                agent_id=agent.id,
+                kind="onchain_registration_requeued",
+                severity="warning",
+                payload_json={"agent_id": str(agent.id), "job_id": str(failed.id)},
+            )
+        )
+        await session.flush()
+        if settings.onchain_enabled:
+            await execute_registration_job(session, settings, failed)
+        return failed
 
     parent_token_id, crossover_parent_token_id = await load_parent_token_ids(session, agent)
     payload = build_agent_registration_payload(
@@ -66,13 +99,19 @@ async def execute_registration_job(session: AsyncSession, settings: Settings, jo
         job.status = "failed"
         job.last_error = "agent not found"
         return
+    if agent.on_chain_token_id:
+        job.status = "confirmed"
+        job.last_error = None
+        return
     job.status = "pending"
     job.attempt_count += 1
+    job.tx_hash = None
     try:
         provisional_cid = await IPFSClient(settings).pin_json(f"mirror-{agent.lineage}-v{agent.version}-provisional", job.payload_json)
         provisional_uri = f"ipfs://{provisional_cid}"
         result = await ChainClient(settings).register_agent(provisional_uri)
         token_id = result["token_id"]
+        job.tx_hash = result["tx_hash"]
         parent_token_id, crossover_parent_token_id = await load_parent_token_ids(session, agent)
         final_payload = build_agent_registration_payload(
             settings,
@@ -83,21 +122,38 @@ async def execute_registration_job(session: AsyncSession, settings: Settings, jo
         )
         final_cid = await IPFSClient(settings).pin_json(f"mirror-{agent.lineage}-v{agent.version}", final_payload)
         final_uri = f"ipfs://{final_cid}"
-        set_uri = await ChainClient(settings).set_agent_uri(int(token_id), final_uri)
+        applied_uri = final_uri
+        applied_cid = final_cid
+        set_uri_tx_hash = None
+        uri_update_error = None
+        try:
+            set_uri = await ChainClient(settings).set_agent_uri(int(token_id), final_uri)
+            set_uri_tx_hash = set_uri["tx_hash"]
+        except ChainTransactionFailed as exc:
+            # The identity mint already exists on-chain. If URI mutation reverts, preserve the minted token and
+            # keep the provisional URI rather than treating the whole registration as failed.
+            applied_uri = provisional_uri
+            applied_cid = provisional_cid
+            uri_update_error = str(exc)
         agent.on_chain_token_id = token_id
         agent.on_chain_tx_hash = result["tx_hash"]
-        agent.agent_uri = final_uri
-        agent.ipfs_cid = final_cid
+        agent.agent_uri = applied_uri
+        agent.ipfs_cid = applied_cid
         job.status = "confirmed"
-        job.tx_hash = result["tx_hash"]
         job.last_error = None
         job.payload_json = final_payload
         session.add(
             Event(
                 agent_id=agent.id,
                 kind="onchain_registration_confirmed",
-                severity="info",
-                payload_json={"token_id": token_id, "mint_tx_hash": result["tx_hash"], "set_uri_tx_hash": set_uri["tx_hash"], "agent_uri": final_uri},
+                severity="warning" if uri_update_error else "info",
+                payload_json={
+                    "token_id": token_id,
+                    "mint_tx_hash": result["tx_hash"],
+                    "set_uri_tx_hash": set_uri_tx_hash,
+                    "agent_uri": applied_uri,
+                    "uri_update_error": uri_update_error,
+                },
             )
         )
     except (IPFSPinningFailed, ChainTransactionFailed, Exception) as exc:

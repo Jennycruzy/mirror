@@ -105,6 +105,32 @@ async def test_place_spot_paper_order_uses_spot_paper_namespace():
 
 
 @pytest.mark.asyncio
+async def test_trading_status_account_mode_survives_positions_failure():
+    client = RecordingKrakenClient(
+        Settings(kraken_execution_mode="account", kraken_require_paper_mode=False),
+        responses=[
+            {
+                "accounts": {
+                    "flex": {
+                        "portfolioValue": "20655.67",
+                        "totalUnrealized": "-12.34",
+                        "availableMargin": "20000",
+                        "collateralValue": "20500",
+                    }
+                }
+            }
+        ],
+        failures={("futures", "positions", "-o", "json")},
+    )
+
+    payload = await client.trading_status()
+
+    assert payload["status"]["equity"] == 20655.67
+    assert payload["status"]["degraded"] is True
+    assert payload["positions"]["positions"] == []
+
+
+@pytest.mark.asyncio
 async def test_discover_symbols_does_not_treat_crypto_suffix_x_as_xstock():
     client = RecordingKrakenClient(
         Settings(),

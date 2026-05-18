@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -5,15 +6,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mirror.clients.kraken import KrakenClient, extract_price_for_symbol, extract_spot_price
 from mirror.config import Settings
+from mirror.errors import KrakenCliCommandFailed
 from mirror.models import Event, Forecast, Trade
 
 
-async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> int:
+@dataclass(frozen=True)
+class ExitSweepResult:
+    closed_count: int = 0
+    degraded: bool = False
+
+
+async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> ExitSweepResult:
     if settings.mirror_mode != "tournament" or not settings.trading_enabled:
-        return 0
+        return ExitSweepResult()
 
     kraken = KrakenClient(settings)
-    await record_equity_snapshot(session, settings, kraken)
+    degraded = False
+    try:
+        await record_equity_snapshot(session, settings, kraken)
+    except KrakenCliCommandFailed as exc:
+        degraded = True
+        session.add(
+            Event(
+                agent_id=None,
+                kind="tournament_exit_snapshot_degraded",
+                severity="warning",
+                payload_json={"error": str(exc), "transient": True},
+            )
+        )
+        await session.flush()
 
     trades = (
         await session.execute(
@@ -24,13 +45,40 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
         )
     ).scalars().all()
     if not trades:
-        return 0
+        await session.commit()
+        return ExitSweepResult(closed_count=0, degraded=degraded)
 
     if settings.kraken_execution_mode == "spot_paper":
         symbols = sorted({trade.ticker for trade in trades})
-        ticker_payload = {symbol: await kraken.spot_ticker(symbol) for symbol in symbols}
+        try:
+            ticker_payload = {symbol: await kraken.spot_ticker(symbol) for symbol in symbols}
+        except KrakenCliCommandFailed as exc:
+            degraded = True
+            session.add(
+                Event(
+                    agent_id=None,
+                    kind="tournament_exit_sweep_degraded",
+                    severity="warning",
+                    payload_json={"stage": "spot_tickers", "error": str(exc), "transient": True},
+                )
+            )
+            await session.commit()
+            return ExitSweepResult(closed_count=0, degraded=degraded)
     else:
-        ticker_payload = await kraken.futures_tickers()
+        try:
+            ticker_payload = await kraken.futures_tickers()
+        except KrakenCliCommandFailed as exc:
+            degraded = True
+            session.add(
+                Event(
+                    agent_id=None,
+                    kind="tournament_exit_sweep_degraded",
+                    severity="warning",
+                    payload_json={"stage": "futures_tickers", "error": str(exc), "transient": True},
+                )
+            )
+            await session.commit()
+            return ExitSweepResult(closed_count=0, degraded=degraded)
     closed_count = 0
     for trade in trades:
         forecast = await session.get(Forecast, trade.forecast_id)
@@ -51,14 +99,33 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
 
         close_side = "sell" if trade.side == "buy" else "buy"
         idempotency_key = f"{trade.id}:exit:{reason}"
-        response = await kraken.place_order(
-            symbol=trade.ticker,
-            side=close_side,
-            size_usd=trade.size_usd,
-            leverage=trade.leverage,
-            idempotency_key=idempotency_key,
-            reduce_only=True,
-        )
+        try:
+            response = await kraken.place_order(
+                symbol=trade.ticker,
+                side=close_side,
+                size_usd=trade.size_usd,
+                leverage=trade.leverage,
+                idempotency_key=idempotency_key,
+                reduce_only=True,
+            )
+        except KrakenCliCommandFailed as exc:
+            degraded = True
+            session.add(
+                Event(
+                    agent_id=trade.agent_id,
+                    kind="tournament_trade_close_degraded",
+                    severity="warning",
+                    payload_json={
+                        "trade_id": str(trade.id),
+                        "forecast_id": str(trade.forecast_id),
+                        "ticker": trade.ticker,
+                        "reason": reason,
+                        "error": str(exc),
+                        "transient": True,
+                    },
+                )
+            )
+            continue
         trade.status = "closed"
         trade.closed_at = datetime.now(UTC)
         trade.exit_price = price
@@ -83,7 +150,7 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
         )
         closed_count += 1
     await session.commit()
-    return closed_count
+    return ExitSweepResult(closed_count=closed_count, degraded=degraded)
 
 
 def exit_reason(forecast: Forecast, trade: Trade, pnl_pct: float, settings: Settings | None = None) -> str | None:

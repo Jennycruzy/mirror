@@ -296,7 +296,21 @@ class KrakenClient:
 
     async def trading_status(self) -> dict[str, Any]:
         if self.settings.kraken_execution_mode == "account":
-            return normalize_account_status(await self.verify_execution_mode(), baseline_equity=self.settings.tournament_account_equity_usd)
+            accounts = (await self.run_json(["futures", "accounts", "-o", "json"])).json_data
+            degraded_reason = None
+            try:
+                positions = (await self.run_json(["futures", "positions", "-o", "json"])).json_data
+            except KrakenCliCommandFailed as exc:
+                positions = {"openPositions": []}
+                degraded_reason = str(exc)
+            normalized = normalize_account_status(
+                {"status": {"mode": "account"}, "accounts": accounts, "positions": positions},
+                baseline_equity=self.settings.tournament_account_equity_usd,
+            )
+            if degraded_reason:
+                normalized["status"]["degraded"] = True
+                normalized["status"]["degraded_reason"] = degraded_reason
+            return normalized
         if self.settings.kraken_execution_mode == "spot_paper":
             status = (await self.run_json(["paper", "status", "-o", "json"])).json_data
             balance = (await self.run_json(["paper", "balance", "-o", "json"])).json_data

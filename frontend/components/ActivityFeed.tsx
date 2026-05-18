@@ -59,7 +59,14 @@ function severityClass(severity?: string) {
 }
 
 function labelFor(kind: string) {
-  return String(kind ?? "event").replaceAll("_", " ").toUpperCase();
+  const labels: Record<string, string> = {
+    tournament_exit_sweep_degraded: "EXIT SWEEP DEGRADED",
+    tournament_exit_sweep_recovered: "EXIT SWEEP RECOVERED",
+    tournament_exit_snapshot_degraded: "EQUITY SNAPSHOT DEGRADED",
+    tournament_trade_close_degraded: "TRADE CLOSE DEGRADED",
+    onchain_registration_requeued: "ONCHAIN REGISTRATION REQUEUED",
+  };
+  return labels[kind] ?? String(kind ?? "event").replaceAll("_", " ").toUpperCase();
 }
 
 function filterButtonClass(active: boolean) {
@@ -70,6 +77,12 @@ function filterButtonClass(active: boolean) {
 
 function summaryFor(event: MirrorEvent) {
   const payload = event.payload ?? {};
+  if (event.kind === "tournament_exit_sweep_recovered" && typeof payload.recovered_from === "string") {
+    return `Recovered after ${payload.recovered_from}`;
+  }
+  if (typeof payload.transient === "boolean" && payload.transient && typeof payload.error === "string") {
+    return `Transient broker issue: ${payload.error}`;
+  }
   if (typeof payload.reason === "string") return payload.reason;
   if (typeof payload.ticker === "string") return payload.ticker;
   if (typeof payload.forecast_id === "string") return `forecast ${payload.forecast_id.slice(0, 8)}`;

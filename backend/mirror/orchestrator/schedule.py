@@ -9,6 +9,7 @@ from mirror.agents.red import run_red_once
 from mirror.agents.strategy_schema import parse_strategy_yaml
 from mirror.config import Settings
 from mirror.db import SessionLocal
+from mirror.errors import KrakenCliCommandFailed
 from mirror.models import Agent, Event, Trade
 from mirror.orchestrator.resolution import build_resolution_graph
 from mirror.tournament.adaptive import compute_direction_stats, rank_symbols_by_recent_pnl
@@ -128,14 +129,58 @@ async def run_scout_floor_check(settings: Settings) -> None:
 async def run_tournament_exits(settings: Settings) -> None:
     try:
         async with SessionLocal() as session:
-            closed_count = await manage_tournament_exits(session, settings)
-            if closed_count:
-                session.add(Event(agent_id=None, kind="tournament_exit_sweep", severity="info", payload_json={"closed_count": closed_count}))
+            result = await manage_tournament_exits(session, settings)
+            if not result.degraded:
+                await mark_exit_sweep_recovered(session)
+            if result.closed_count:
+                session.add(Event(agent_id=None, kind="tournament_exit_sweep", severity="info", payload_json={"closed_count": result.closed_count}))
                 await session.commit()
+            elif session.new:
+                await session.commit()
+    except KrakenCliCommandFailed as exc:
+        async with SessionLocal() as session:
+            session.add(
+                Event(
+                    agent_id=None,
+                    kind="tournament_exit_sweep_degraded",
+                    severity="warning",
+                    payload_json={"error": str(exc), "transient": True, "source": "scheduler"},
+                )
+            )
+            await session.commit()
     except Exception as exc:
         async with SessionLocal() as session:
-            session.add(Event(agent_id=None, kind="tournament_exit_sweep_failed", severity="error", payload_json={"error": str(exc)}))
+            session.add(Event(agent_id=None, kind="tournament_exit_sweep_failed", severity="error", payload_json={"error": str(exc), "source": "scheduler"}))
             await session.commit()
+
+
+async def mark_exit_sweep_recovered(session) -> None:
+    latest = (
+        await session.execute(
+            select(Event)
+            .where(
+                Event.kind.in_(
+                    [
+                        "tournament_exit_sweep_failed",
+                        "tournament_exit_sweep_degraded",
+                        "tournament_exit_sweep_recovered",
+                    ]
+                )
+            )
+            .order_by(Event.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest is None or latest.kind == "tournament_exit_sweep_recovered":
+        return
+    session.add(
+        Event(
+            agent_id=None,
+            kind="tournament_exit_sweep_recovered",
+            severity="info",
+            payload_json={"recovered_from": latest.kind, "previous_at": latest.created_at.isoformat() if latest.created_at else None},
+        )
+    )
 
 
 def build_scheduler(settings: Settings) -> AsyncIOScheduler:

@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     featherless_model: str = "Qwen/Qwen2.5-7B-Instruct"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3-pro"
+    patcher_provider: str = "featherless"
+    patcher_base_url: str | None = None
+    patcher_api_key: str | None = None
+    patcher_model: str | None = None
     base_sepolia_rpc_url: str = "https://sepolia.base.org"
     base_sepolia_chain_id: int = 84532
     owner_private_key: str | None = None

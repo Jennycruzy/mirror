@@ -12,7 +12,7 @@ from mirror.backtest.replay import replay_strategy
 from mirror.calibration.brier import calibration_buckets
 from mirror.chain.identity import queue_or_register_agent
 from mirror.chain.reputation import queue_brier_feedback
-from mirror.clients.gemini import GeminiClient
+from mirror.clients.patcher_model import generate_patcher_json
 from mirror.config import Settings
 from mirror.errors import PatchValidationFailed
 from mirror.models import Agent, BlueFinding, Event, Forecast, Patch
@@ -165,8 +165,6 @@ async def propose_patch_for_finding(session: AsyncSession, settings: Settings, f
 
 
 async def request_patch(settings: Settings, strategy_yaml: str, finding: BlueFinding, recent_forecasts: list[Forecast]) -> PatchProposal:
-    if not settings.gemini_api_key:
-        raise PatchValidationFailed("GEMINI_API_KEY is required for Strategy Patcher")
     strategy = parse_strategy_yaml(strategy_yaml)
     samples = [(f.probability_up, f.realized_probability_outcome) for f in recent_forecasts if f.realized_probability_outcome is not None]
     calibration = [
@@ -185,7 +183,7 @@ async def request_patch(settings: Settings, strategy_yaml: str, finding: BlueFin
         f"Recent forecast examples JSON:\n{forecast_examples(recent_forecasts)}\n\n"
         "Return JSON shape: {\"mutable_changes\": {...}, \"rationale\": \"...\", \"expected_brier_improvement\": 0.05}"
     )
-    return await GeminiClient(settings).generate_json(prompt, PatchProposal)
+    return await generate_patcher_json(settings, prompt, PatchProposal)
 
 
 async def store_rejected_patch(

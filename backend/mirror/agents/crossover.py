@@ -15,7 +15,7 @@ from mirror.backtest.replay import replay_strategy
 from mirror.calibration.brier import calibration_buckets
 from mirror.chain.identity import queue_or_register_agent
 from mirror.chain.reputation import queue_brier_feedback
-from mirror.clients.gemini import GeminiClient
+from mirror.clients.patcher_model import generate_patcher_json
 from mirror.config import Settings
 from mirror.errors import PatchValidationFailed
 from mirror.models import Agent, Event, Forecast, Patch
@@ -206,8 +206,6 @@ async def request_crossover_patch(
     recipient: Agent,
     recent_forecasts: list[Forecast],
 ) -> PatchProposal:
-    if not settings.gemini_api_key:
-        raise PatchValidationFailed("GEMINI_API_KEY is required for crossover adaptation")
     samples = [(f.probability_up, f.realized_probability_outcome) for f in recent_forecasts if f.realized_probability_outcome is not None]
     calibration = [bucket.__dict__ for bucket in calibration_buckets(samples) if bucket.count > 0]
     recipient_strategy = parse_strategy_yaml(recipient.strategy_yaml)
@@ -230,7 +228,7 @@ async def request_crossover_patch(
         f"Recipient recent forecast examples JSON:\n{forecast_examples(recent_forecasts)}\n\n"
         "Return JSON shape: {\"mutable_changes\": {...}, \"rationale\": \"...\", \"expected_brier_improvement\": 0.05}"
     )
-    return await GeminiClient(settings).generate_json(prompt, PatchProposal)
+    return await generate_patcher_json(settings, prompt, PatchProposal)
 
 
 def store_crossover_rejection(

@@ -70,8 +70,8 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
   const patchesPassed = data.patches.filter((patch) => patch.gate_passed).length;
   const patchesRejected = data.patches.filter((patch) => patch.status === "rejected").length;
   const crossovers = data.patches.filter((patch) => patch.patch_type === "crossover").length;
-  const paperPnl = data.paperStatus?.status?.pnl;
-  const paperEquity = data.paperStatus?.status?.equity;
+  const paperPnl = data.paperStatus?.status?.pnl ?? data.paperStatus?.status?.unrealized_pnl;
+  const paperEquity = data.paperStatus?.status?.equity ?? data.paperStatus?.status?.current_value;
 
   return (
     <main className="relative min-h-screen overflow-hidden px-5 py-6 lg:px-10">

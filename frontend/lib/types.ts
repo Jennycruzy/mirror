@@ -67,12 +67,14 @@ export type Trade = {
 export type PaperStatus = {
   status: {
     collateral?: number;
+    current_value?: number;
     equity?: number;
     pnl?: number;
     pnl_pct?: number;
     unrealized_pnl?: number;
     positions?: number;
     total_fills?: number;
+    total_trades?: number;
     mode?: string;
   };
   positions: {

@@ -2,21 +2,25 @@ import type { PaperStatus, Trade } from "../lib/types";
 
 export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatus | null; trades: Trade[] }) {
   const positions = paperStatus?.positions?.positions ?? [];
+  const equity = paperStatus?.status?.equity ?? paperStatus?.status?.current_value;
+  const netPnl = paperStatus?.status?.pnl ?? paperStatus?.status?.unrealized_pnl;
+  const fills = paperStatus?.status?.total_fills ?? paperStatus?.status?.total_trades ?? trades.length;
+  const venueLabel = paperStatus?.status?.mode === "paper" ? "Kraken Spot Paper" : "Kraken Futures Paper";
   return (
     <section className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-xl">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Kraken Futures Paper</p>
+          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{venueLabel}</p>
           <h2 className="mt-2 text-2xl font-semibold text-slate-50">Open Positions & PnL</h2>
         </div>
         <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">{paperStatus?.status?.mode ?? "unknown"}</span>
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-4">
-        <Metric label="Equity" value={money(paperStatus?.status?.equity)} />
-        <Metric label="Net PnL" value={money(paperStatus?.status?.pnl)} tone={(paperStatus?.status?.pnl ?? 0) >= 0 ? "good" : "bad"} />
+        <Metric label="Equity" value={money(equity)} />
+        <Metric label="Net PnL" value={money(netPnl)} tone={(netPnl ?? 0) >= 0 ? "good" : "bad"} />
         <Metric label="Unrealized" value={money(paperStatus?.status?.unrealized_pnl)} tone={(paperStatus?.status?.unrealized_pnl ?? 0) >= 0 ? "good" : "bad"} />
-        <Metric label="Fills" value={`${paperStatus?.status?.total_fills ?? trades.length}`} />
+        <Metric label="Fills" value={`${fills}`} />
       </div>
 
       {positions.length ? (
@@ -51,7 +55,7 @@ export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatu
           </table>
         </div>
       ) : (
-        <p className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm text-slate-400">No open Kraken futures paper positions.</p>
+        <p className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm text-slate-400">No open Kraken futures-style positions. Spot paper balances and PnL are shown above.</p>
       )}
     </section>
   );

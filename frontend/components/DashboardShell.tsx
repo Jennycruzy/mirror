@@ -116,7 +116,7 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
           <TerminalStat label="Crossovers" value={crossovers} />
         </div>
         <div className="grid gap-px bg-slate-800 border-t border-slate-800 md:grid-cols-2 xl:grid-cols-6">
-          <TerminalStat label="Execution Mode" value={mode.toUpperCase()} />
+          <TerminalStat label="Execution Mode" value={String(mode).toUpperCase()} />
           <TerminalStat label="Open Trades" value={openTrades.length} />
           <TerminalStat label="Long / Short" value={`${longCount}/${shortCount}`} />
           <TerminalStat label="Closed Fills" value={closedTrades.length} />
@@ -155,7 +155,7 @@ function TerminalStat({ label, value, tone }: { label: string; value: string | n
 }
 
 function money(value: number | null | undefined) {
-  return value === null || value === undefined ? "n/a" : `$${value.toFixed(2)}`;
+  return typeof value === "number" && Number.isFinite(value) ? `$${value.toFixed(2)}` : "n/a";
 }
 
 function average(values: number[]) {

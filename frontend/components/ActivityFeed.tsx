@@ -35,7 +35,7 @@ function severityClass(severity?: string) {
 }
 
 function labelFor(kind: string) {
-  return kind.replaceAll("_", " ").toUpperCase();
+  return String(kind ?? "event").replaceAll("_", " ").toUpperCase();
 }
 
 function summaryFor(event: MirrorEvent) {

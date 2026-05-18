@@ -18,7 +18,7 @@ export function PatchQueuePanel({ patches }: { patches: PatchRecord[] }) {
         {recent.map((patch) => (
           <article key={patch.id} className="p-4 text-sm hover:bg-slate-900/60">
             <div className="flex items-center justify-between gap-3">
-              <span className="font-mono text-slate-200">{patch.patch_type.toUpperCase()}</span>
+              <span className="font-mono text-slate-200">{String(patch.patch_type ?? "patch").toUpperCase()}</span>
               <span className={statusClass(patch.status)}>{patch.status}</span>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
@@ -42,5 +42,5 @@ function statusClass(status: string) {
 }
 
 function number(value: number | null | undefined) {
-  return value === null || value === undefined ? "n/a" : value.toFixed(3);
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(3) : "n/a";
 }

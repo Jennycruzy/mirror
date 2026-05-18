@@ -53,7 +53,7 @@ function AgentCard({ agent }: { agent: Agent }) {
           {latest ? (
             <div className="mt-3 grid gap-2 font-mono text-sm text-slate-300 sm:grid-cols-4">
               <span className="text-slate-100">{latest.ticker}</span>
-              <span className={latest.predicted_direction === "long" ? "text-teal-300" : latest.predicted_direction === "short" ? "text-rose-300" : "text-slate-400"}>{latest.predicted_direction.toUpperCase()}</span>
+              <span className={latest.predicted_direction === "long" ? "text-teal-300" : latest.predicted_direction === "short" ? "text-rose-300" : "text-slate-400"}>{String(latest.predicted_direction ?? "flat").toUpperCase()}</span>
               <span>{Math.round(latest.confidence * 100)}% confidence</span>
               <span>{latest.will_trade ? "EXECUTE" : "HOLD"}</span>
             </div>
@@ -98,5 +98,5 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 function formatNumber(value: number | null | undefined, digits: number) {
-  return value === null || value === undefined ? "n/a" : value.toFixed(digits);
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "n/a";
 }

@@ -48,10 +48,10 @@ export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatu
                 <tr key={trade.id} className="hover:bg-slate-900/70">
                   <td className="py-3 pl-4 text-slate-500">{trade.opened_at ? new Date(trade.opened_at).toLocaleTimeString() : "n/a"}</td>
                   <td className="text-slate-100">{trade.ticker}</td>
-                  <td className={trade.side === "buy" ? "text-teal-300" : "text-rose-300"}>{trade.side.toUpperCase()}</td>
+                  <td className={trade.side === "buy" ? "text-teal-300" : "text-rose-300"}>{String(trade.side ?? "").toUpperCase()}</td>
                   <td>{money(trade.size_usd)}</td>
                   <td>{number(trade.entry_price)}</td>
-                  <td>{trade.status.toUpperCase()}</td>
+                  <td>{String(trade.status ?? "").toUpperCase()}</td>
                   <td className="text-slate-500">{displayOrderId(trade.kraken_order_id, trade.id)}</td>
                 </tr>
               ))
@@ -86,7 +86,7 @@ export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatu
                 <tr key={`${position.symbol}-${position.side}`} className="hover:bg-slate-900/70">
                   <td className="py-3 font-medium text-slate-100">{position.symbol}</td>
                   <td className={position.side === "long" ? "capitalize text-teal-300" : "capitalize text-rose-300"}>{position.side}</td>
-                  <td>{position.size.toFixed(2)}</td>
+                  <td>{number(position.size, 2)}</td>
                   <td>{number(position.entry_price)}</td>
                   <td>{number(position.mark_price)}</td>
                   <td>{number(position.leverage)}x</td>
@@ -115,11 +115,11 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
 }
 
 function money(value: number | null | undefined) {
-  return value === null || value === undefined ? "n/a" : `$${value.toFixed(2)}`;
+  return typeof value === "number" && Number.isFinite(value) ? `$${value.toFixed(2)}` : "n/a";
 }
 
-function number(value: number | null | undefined) {
-  return value === null || value === undefined ? "n/a" : value.toFixed(4);
+function number(value: number | null | undefined, digits = 4) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "n/a";
 }
 
 function displayOrderId(orderId: string | null | undefined, tradeId: string) {

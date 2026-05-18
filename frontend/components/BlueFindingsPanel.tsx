@@ -23,13 +23,17 @@ export function BlueFindingsPanel({ findings }: { findings: BlueFinding[] }) {
             <p className="mt-2 text-slate-200">{finding.suggested_failure_mode}</p>
             <p className="mt-2 text-xs text-blue-200/80">{finding.suggested_fix_direction}</p>
             <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-3">
-              <span>Brier gap {finding.brier_gap.toFixed(3)}</span>
-              <span>Pred {finding.predicted_confidence_avg.toFixed(2)}</span>
-              <span>Actual {finding.realized_accuracy.toFixed(2)}</span>
+              <span>Brier gap {number(finding.brier_gap, 3)}</span>
+              <span>Pred {number(finding.predicted_confidence_avg, 2)}</span>
+              <span>Actual {number(finding.realized_accuracy, 2)}</span>
             </div>
           </article>
         ))}
       </div>
     </section>
   );
+}
+
+function number(value: number | null | undefined, digits: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "n/a";
 }

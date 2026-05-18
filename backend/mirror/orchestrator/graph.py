@@ -139,7 +139,12 @@ def tournament_scout_forecast(strategy, state: RedState, forecast_obj: RedForeca
         return forecast_obj
     if volume_quote is not None and volume_quote < 100_000:
         return forecast_obj
-    direction = "long" if change24h > 0 else "short"
+    if state["settings"].kraken_execution_mode == "spot_paper":
+        direction = "long"
+        scout_tag = "spot_paper_dip_buy" if change24h < 0 else "spot_paper_momentum_long"
+    else:
+        direction = "long" if change24h > 0 else "short"
+        scout_tag = "momentum_up" if direction == "long" else "momentum_down"
     expected_move_bps = min(max(abs(change24h) * 100.0, strategy.mutable.tournament_min_expected_move_bps), 150.0)
     confidence = min(max(strategy.mutable.entry_confidence_threshold, 0.55 + min(abs(change24h), 2.0) / 20.0), 0.74)
     scout_size = strategy.locked.scout_size_usd * min(max(strategy.mutable.position_size_multiplier, 1.0), 2.0)
@@ -148,7 +153,7 @@ def tournament_scout_forecast(strategy, state: RedState, forecast_obj: RedForeca
         predicted_magnitude_bps=expected_move_bps,
         confidence=confidence,
         time_horizon_minutes=strategy.locked.default_horizon_minutes,
-        regime_tags=[*forecast_obj.regime_tags, "tournament_scout", "momentum_up" if direction == "long" else "momentum_down"],
+        regime_tags=[*forecast_obj.regime_tags, "tournament_scout", scout_tag],
         will_trade=True,
         position_size_usd=scout_size,
         leverage=min(strategy.mutable.max_leverage, 2),

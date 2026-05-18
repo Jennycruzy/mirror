@@ -72,60 +72,60 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
   const crossovers = data.patches.filter((patch) => patch.patch_type === "crossover").length;
   const paperPnl = data.paperStatus?.status?.pnl ?? data.paperStatus?.status?.unrealized_pnl;
   const paperEquity = data.paperStatus?.status?.equity ?? data.paperStatus?.status?.current_value;
+  const latestTicker = data.forecasts[0]?.ticker ?? "BTC/USD";
+  const openForecasts = data.forecasts.filter((forecast) => forecast.status === "open").length;
 
   return (
-    <main className="relative min-h-screen overflow-hidden px-5 py-6 lg:px-10">
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_12%,rgba(245,158,11,0.18),transparent_28%),radial-gradient(circle_at_80%_4%,rgba(45,212,191,0.14),transparent_24%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(2,6,23,1))]" />
-      <header className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.62em] text-amber-300">MIRROR</p>
-          <h1 className="mt-4 max-w-5xl text-5xl font-semibold tracking-[-0.05em] text-slate-50 md:text-7xl">Calibration warfare for autonomous markets.</h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-400">Red trades, Blue attacks confidence, Gemini patches, holdout gates decide survival. Every number here comes from the backend.</p>
+    <main className="min-h-screen bg-[#05070b] px-4 py-4 text-slate-100 lg:px-6">
+      <header className="mb-4 border border-slate-800 bg-slate-950">
+        <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm font-semibold tracking-[0.5em] text-amber-300">MIRROR</p>
+            <span className="h-5 w-px bg-slate-800" />
+            <h1 className="text-lg font-semibold tracking-tight text-slate-50">AI Trading Terminal</h1>
+            <span className="rounded bg-slate-900 px-2 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{latestTicker}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.16em]">
+            <span className={error ? "text-rose-300" : "text-teal-300"}>{error ? "degraded" : "connected"}</span>
+            <span className="text-slate-700">/</span>
+            <span className="text-slate-400">{lastUpdated ? `sync ${lastUpdated}` : "awaiting stream"}</span>
+          </div>
         </div>
-        <div className="rounded-3xl border border-slate-700/70 bg-slate-950/70 p-4 text-sm text-slate-400 shadow-2xl backdrop-blur">
-          <p className="text-slate-500">System Link</p>
-          <p className="mt-1 text-slate-100">{error ? "degraded" : "connected"}</p>
-          <p className="mt-1 text-xs">{lastUpdated ? `updated ${lastUpdated}` : "waiting for SSE"}</p>
+        <div className="grid gap-px bg-slate-800 md:grid-cols-4 xl:grid-cols-7">
+          <TerminalStat label="Portfolio" value={money(paperEquity)} />
+          <TerminalStat label="Net PnL" value={money(paperPnl)} tone={(paperPnl ?? 0) >= 0 ? "good" : "bad"} />
+          <TerminalStat label="Orders" value={totalTrades} />
+          <TerminalStat label="Open Signals" value={openForecasts} />
+          <TerminalStat label="Forecasts" value={data.forecasts.length} />
+          <TerminalStat label="Patches" value={`${patchesPassed}/${patchesRejected}`} />
+          <TerminalStat label="Crossovers" value={crossovers} />
         </div>
       </header>
 
-      {error ? <div className="mb-6 rounded-3xl border border-rose-400/50 bg-rose-950/40 p-4 text-rose-100 shadow-xl">{error}</div> : null}
+      {error ? <div className="mb-4 border border-rose-500/50 bg-rose-950/40 p-3 text-sm text-rose-100">{error}</div> : null}
 
-      <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <Stat label="Forecasts" value={data.forecasts.length} note="total returned" />
-        <Stat label="Paper PnL" value={money(paperPnl)} note="realized + unrealized" tone={(paperPnl ?? 0) >= 0 ? "good" : "bad"} />
-        <Stat label="Equity" value={money(paperEquity)} note="Kraken paper" />
-        <Stat label="Trades Today" value={totalTrades} note="paper only" />
-        <Stat label="Patches Passed" value={patchesPassed} note="holdout gate" />
-        <Stat label="Patches Rejected" value={patchesRejected} note="with reasons" />
-        <Stat label="Crossovers" value={crossovers} note="horizontal lineage" />
+      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="space-y-4">
+          <PositionTable paperStatus={data.paperStatus} trades={data.trades} />
+          <BattalionGrid agents={data.agents} />
+        </div>
+
+        <aside className="space-y-4">
+          <ActivityFeed events={events} />
+          <BlueFindingsPanel findings={data.blueFindings} />
+          <OnchainQueue jobs={data.onchainJobs} />
+        </aside>
       </section>
-
-      <BattalionGrid agents={data.agents} />
-
-      <div className="mt-6">
-        <PositionTable paperStatus={data.paperStatus} trades={data.trades} />
-      </div>
-
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <BlueFindingsPanel findings={data.blueFindings} />
-        <OnchainQueue jobs={data.onchainJobs} />
-      </div>
-
-      <div className="mt-6">
-        <ActivityFeed events={events} />
-      </div>
     </main>
   );
 }
 
-function Stat({ label, value, note, tone }: { label: string; value: string | number; note: string; tone?: "good" | "bad" }) {
+function TerminalStat({ label, value, tone }: { label: string; value: string | number; tone?: "good" | "bad" }) {
   const valueClass = tone === "good" ? "text-teal-300" : tone === "bad" ? "text-rose-300" : "text-slate-50";
   return (
-    <div className="group rounded-3xl border border-slate-800/90 bg-slate-950/60 p-5 shadow-xl backdrop-blur transition duration-300 hover:-translate-y-1 hover:border-amber-300/50">
-      <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{label}</p>
-      <p className={`mt-3 text-3xl font-semibold tracking-tight ${valueClass}`}>{value}</p>
-      <p className="mt-2 text-xs text-slate-500">{note}</p>
+    <div className="bg-slate-950 px-4 py-3">
+      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-600">{label}</p>
+      <p className={`mt-1 font-mono text-xl font-semibold ${valueClass}`}>{value}</p>
     </div>
   );
 }

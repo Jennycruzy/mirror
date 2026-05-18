@@ -9,7 +9,7 @@ from mirror.agents.strategy_schema import RedForecast, parse_strategy_yaml
 from mirror.calibration.brier import direction_to_probability_up
 from mirror.clients.featherless import FeatherlessClient
 from mirror.clients.gemini import GeminiClient
-from mirror.clients.kraken import KrakenClient, select_best_xstock_record
+from mirror.clients.kraken import KrakenClient, select_best_xstock_record, spot_ticker_record
 from mirror.config import Settings
 from mirror.errors import InferenceMalformedJSON
 from mirror.models import Agent, Event, Forecast, MarketTick, Trade
@@ -46,19 +46,24 @@ async def fetch_market_state(state: RedState) -> RedState:
             )
         ).scalar_one()
         strategy = parse_strategy_yaml(agent.strategy_yaml)
-        ticker = strategy.locked.locked_tickers[0] if strategy.locked.locked_tickers else None
-        if not ticker:
-            raise RuntimeError("No discovered Kraken xStock perpetual symbols are assigned to this strategy")
-        ticker_payload = (await kraken.run_json(["futures", "tickers", "-o", "json"])).json_data
-        if state["settings"].mirror_mode == "tournament":
-            selected_record = select_best_xstock_record(ticker_payload, strategy.locked.locked_tickers)
-            if selected_record is not None:
-                ticker = selected_record.symbol
-                selected_ticker = selected_record.raw
+        if settings.kraken_execution_mode == "spot_paper":
+            ticker = settings.trading_pair
+            ticker_payload = await kraken.spot_ticker(ticker)
+            selected_ticker = spot_ticker_record(ticker_payload, ticker)
+        else:
+            ticker = strategy.locked.locked_tickers[0] if strategy.locked.locked_tickers else None
+            if not ticker:
+                raise RuntimeError("No discovered Kraken xStock perpetual symbols are assigned to this strategy")
+            ticker_payload = (await kraken.run_json(["futures", "tickers", "-o", "json"])).json_data
+            if state["settings"].mirror_mode == "tournament":
+                selected_record = select_best_xstock_record(ticker_payload, strategy.locked.locked_tickers)
+                if selected_record is not None:
+                    ticker = selected_record.symbol
+                    selected_ticker = selected_record.raw
+                else:
+                    selected_ticker = extract_record_for_symbol(ticker_payload, ticker) or {}
             else:
                 selected_ticker = extract_record_for_symbol(ticker_payload, ticker) or {}
-        else:
-            selected_ticker = extract_record_for_symbol(ticker_payload, ticker) or {}
         price = extract_price_for_symbol(selected_ticker or ticker_payload, ticker)
         if price is None:
             raise RuntimeError(f"Could not extract a real price for discovered symbol {ticker} from Kraken ticker output")
@@ -171,6 +176,12 @@ async def decide_action(state: RedState) -> RedState:
     settings = state["settings"]
     payload = state["forecast_payload"]
     should_trade = bool(payload["will_trade"] and payload["predicted_direction"] in {"long", "short"})
+    if settings.kraken_execution_mode == "spot_paper" and payload["predicted_direction"] == "short":
+        should_trade = False
+        payload = {
+            **payload,
+            "tournament_risk_decision": {"allowed": False, "reason": "spot_paper does not open short positions"},
+        }
     if should_trade and settings.mirror_mode == "tournament":
         strategy = parse_strategy_yaml(state["strategy_yaml"])
         forecast_obj = RedForecast.model_validate(payload)

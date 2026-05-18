@@ -1,6 +1,6 @@
 import pytest
 
-from mirror.clients.kraken import KrakenClient, KrakenCommandResult, extract_xstock_perp_symbols, format_cli_number, is_xstock_perp_symbol, select_best_xstock_record
+from mirror.clients.kraken import KrakenClient, KrakenCommandResult, extract_spot_price, extract_xstock_perp_symbols, format_cli_number, is_xstock_perp_symbol, select_best_xstock_record, spot_ticker_record
 from mirror.config import Settings
 from mirror.errors import KrakenCliCommandFailed
 
@@ -86,6 +86,25 @@ async def test_place_paper_order_rejects_invalid_side_before_cli_call():
 
 
 @pytest.mark.asyncio
+async def test_place_spot_paper_order_uses_spot_paper_namespace():
+    client = RecordingKrakenClient(
+        Settings(kraken_execution_mode="spot_paper", kraken_require_paper_mode=True),
+        responses=[
+            {"mode": "paper"},
+            {"mode": "paper", "USD": 10000},
+            {"BTC/USD": {"c": ["50000.0"]}},
+            {"mode": "paper", "order_id": "paper-1"},
+        ],
+    )
+
+    response = await client.place_order("BTC/USD", "buy", 500.0, 1, "idem-spot")
+
+    assert response["order_id"] == "paper-1"
+    assert response["client_order_id"] == "idem-spot"
+    assert client.calls[-1] == ["paper", "buy", "BTC/USD", "0.01", "--type", "market", "-o", "json"]
+
+
+@pytest.mark.asyncio
 async def test_discover_symbols_does_not_treat_crypto_suffix_x_as_xstock():
     client = RecordingKrakenClient(
         Settings(),
@@ -112,6 +131,23 @@ def test_xstock_extraction_uses_pair_context_to_exclude_crypto():
     }
 
     assert extract_xstock_perp_symbols(payload) == ["PF_AAPLXUSD", "PF_SPYXUSD"]
+
+
+def test_spot_ticker_record_extracts_price_change_and_quote_volume():
+    payload = {
+        "BTC/USD": {
+            "c": ["76736.2", "0.1"],
+            "o": "77410.1",
+            "p": ["76956.4", "77572.7"],
+            "v": ["418.4", "1386.2"],
+        }
+    }
+
+    assert extract_spot_price(payload, "BTC/USD") == 76736.2
+    record = spot_ticker_record(payload, "BTC/USD")
+    assert record["symbol"] == "BTC/USD"
+    assert record["change24h"] < 0
+    assert record["volumeQuote"] > 100_000
 
 
 def test_select_best_xstock_record_prefers_move_volume_and_spread():

@@ -130,6 +130,8 @@ class KrakenClient:
         return payload
 
     async def verify_execution_mode(self) -> dict[str, Any]:
+        if self.settings.kraken_execution_mode == "spot_paper":
+            return await self.verify_spot_paper_mode()
         if self.settings.kraken_execution_mode == "paper":
             return await self.verify_paper_mode()
         if self.settings.kraken_execution_mode != "account":
@@ -141,6 +143,19 @@ class KrakenClient:
         accounts = (await self.run_json(["futures", "accounts", "-o", "json"])).json_data
         positions = (await self.run_json(["futures", "positions", "-o", "json"])).json_data
         return {"status": {"mode": "account"}, "accounts": accounts, "positions": positions}
+
+    async def verify_spot_paper_mode(self) -> dict[str, Any]:
+        try:
+            status = (await self.run_json(["paper", "status", "-o", "json"])).json_data
+        except KrakenCliCommandFailed:
+            await self.run_json(["paper", "init", "--balance", "10000", "--currency", "USD", "-o", "json"])
+            status = (await self.run_json(["paper", "status", "-o", "json"])).json_data
+        balance = (await self.run_json(["paper", "balance", "-o", "json"])).json_data
+        payload = {"status": status, "balance": balance}
+        text = json.dumps(payload).lower()
+        if self.settings.kraken_require_paper_mode and "paper" not in text:
+            raise KrakenNotPaperMode("Kraken spot paper status/balance did not confirm paper mode")
+        return payload
 
     async def discover_xstock_perp_symbols(self) -> list[str]:
         result = await self.run_json(["futures", "tickers", "-o", "json"])
@@ -208,9 +223,34 @@ class KrakenClient:
         idempotency_key: str,
         reduce_only: bool = False,
     ) -> dict[str, Any]:
+        if self.settings.kraken_execution_mode == "spot_paper":
+            return await self.place_spot_paper_order(symbol, side, size_usd, idempotency_key)
         if self.settings.kraken_execution_mode == "paper":
             return await self.place_paper_order(symbol, side, size_usd, leverage, idempotency_key, reduce_only)
         return await self.place_account_order(symbol, side, size_usd, idempotency_key, reduce_only)
+
+    async def place_spot_paper_order(
+        self,
+        pair: str,
+        side: str,
+        size_usd: float,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if side not in {"buy", "sell"}:
+            raise KrakenCliCommandFailed(f"Invalid spot paper side: {side}")
+        if size_usd <= 0:
+            raise KrakenCliCommandFailed(f"Invalid spot paper size: {size_usd}")
+        await self.verify_spot_paper_mode()
+        ticker_payload = await self.spot_ticker(pair)
+        price = extract_spot_price(ticker_payload, pair)
+        if price is None or price <= 0:
+            raise KrakenCliCommandFailed(f"Could not derive spot paper order volume for {pair}: ticker price unavailable")
+        volume = size_usd / price
+        result = await self.run_json(["paper", side, pair, format_cli_number(volume), "--type", "market", "-o", "json"])
+        response = dict(result.json_data) if isinstance(result.json_data, dict) else {"raw": result.json_data}
+        response["client_order_id"] = idempotency_key
+        response["mode"] = "spot_paper"
+        return response
 
     async def place_account_order(
         self,
@@ -255,12 +295,20 @@ class KrakenClient:
     async def trading_status(self) -> dict[str, Any]:
         if self.settings.kraken_execution_mode == "account":
             return await self.verify_execution_mode()
+        if self.settings.kraken_execution_mode == "spot_paper":
+            status = (await self.run_json(["paper", "status", "-o", "json"])).json_data
+            balance = (await self.run_json(["paper", "balance", "-o", "json"])).json_data
+            history = (await self.run_json(["paper", "history", "-o", "json"])).json_data
+            return {"status": status, "balance": balance, "history": history, "positions": {"positions": []}}
         status = (await self.run_json(["futures", "paper", "status", "-o", "json"])).json_data
         positions = (await self.run_json(["futures", "paper", "positions", "-o", "json"])).json_data
         return {"status": status, "positions": positions}
 
     async def futures_tickers(self) -> dict[str, Any]:
         return (await self.run_json(["futures", "tickers", "-o", "json"])).json_data
+
+    async def spot_ticker(self, pair: str) -> dict[str, Any]:
+        return (await self.run_json(["ticker", pair, "-o", "json"])).json_data
 
 
 def extract_symbols(payload: Any) -> list[str]:
@@ -384,6 +432,71 @@ def extract_price_for_symbol(payload: Any, symbol: str) -> float | None:
             if found is not None:
                 return found
     return None
+
+
+def extract_spot_price(payload: Any, pair: str) -> float | None:
+    if isinstance(payload, dict):
+        records: list[Any] = []
+        if pair in payload:
+            records.append(payload[pair])
+        normalized_pair = pair.replace("/", "")
+        for key, value in payload.items():
+            if isinstance(key, str) and key.replace("/", "").upper() == normalized_pair.upper():
+                records.append(value)
+        for record in records:
+            if isinstance(record, dict):
+                close = record.get("c")
+                if isinstance(close, list) and close:
+                    parsed = parse_float(close[0])
+                    if parsed is not None:
+                        return parsed
+                for key in ("last", "price"):
+                    parsed = parse_float(record.get(key))
+                    if parsed is not None:
+                        return parsed
+        for value in payload.values():
+            found = extract_spot_price(value, pair)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = extract_spot_price(item, pair)
+            if found is not None:
+                return found
+    return None
+
+
+def spot_ticker_record(payload: dict[str, Any], pair: str) -> dict[str, Any]:
+    record = payload.get(pair)
+    if not isinstance(record, dict):
+        normalized_pair = pair.replace("/", "")
+        for key, value in payload.items():
+            if isinstance(key, str) and key.replace("/", "").upper() == normalized_pair.upper() and isinstance(value, dict):
+                record = value
+                break
+    record = record if isinstance(record, dict) else {}
+    last = extract_spot_price(payload, pair)
+    open_price = parse_float(record.get("o"))
+    change24h = None
+    if last is not None and open_price is not None and open_price > 0:
+        change24h = ((last - open_price) / open_price) * 100.0
+    volume = record.get("v")
+    vwap = record.get("p")
+    volume_quote = None
+    if isinstance(volume, list) and isinstance(vwap, list) and len(volume) > 1 and len(vwap) > 1:
+        vol = parse_float(volume[1])
+        avg = parse_float(vwap[1])
+        if vol is not None and avg is not None:
+            volume_quote = vol * avg
+    return {
+        "symbol": pair,
+        "pair": pair,
+        "last": last,
+        "price": last,
+        "change24h": change24h,
+        "volumeQuote": volume_quote,
+        "raw": record,
+    }
 
 
 def parse_float(value: Any) -> float | None:

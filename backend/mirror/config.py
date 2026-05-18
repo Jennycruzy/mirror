@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     kraken_danger_allow_any_url_host: bool = False
     kraken_execution_mode: str = "paper"
     kraken_require_paper_mode: bool = True
+    trading_pair: str = "BTC/USD"
     featherless_api_key: str | None = None
     featherless_base_url: str = "https://api.featherless.ai/v1"
     featherless_model: str = "Qwen/Qwen2.5-7B-Instruct"

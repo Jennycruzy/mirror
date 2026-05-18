@@ -7,7 +7,7 @@ from typing_extensions import TypedDict
 
 from mirror.agents.red import extract_price_for_symbol
 from mirror.calibration.brier import brier_score
-from mirror.clients.kraken import KrakenClient
+from mirror.clients.kraken import KrakenClient, extract_spot_price
 from mirror.config import Settings
 from mirror.models import Event, Forecast, MarketTick
 
@@ -38,10 +38,18 @@ async def resolve_due_forecasts(state: ResolutionState) -> ResolutionState:
         if not due_forecasts:
             return {**state, "resolved_count": 0}
 
-        ticker_payload = (await KrakenClient(settings).run_json(["futures", "tickers", "-o", "json"])).json_data
+        kraken = KrakenClient(settings)
+        if settings.kraken_execution_mode == "spot_paper":
+            symbols = sorted({forecast.ticker for forecast in due_forecasts})
+            ticker_payload = {symbol: await kraken.spot_ticker(symbol) for symbol in symbols}
+        else:
+            ticker_payload = (await kraken.run_json(["futures", "tickers", "-o", "json"])).json_data
         for forecast in due_forecasts:
             observed_at = datetime.now(UTC)
-            current_price = extract_price_for_symbol(ticker_payload, forecast.ticker)
+            if settings.kraken_execution_mode == "spot_paper":
+                current_price = extract_spot_price(ticker_payload.get(forecast.ticker, {}), forecast.ticker)
+            else:
+                current_price = extract_price_for_symbol(ticker_payload, forecast.ticker)
             if current_price is None:
                 session.add(
                     Event(

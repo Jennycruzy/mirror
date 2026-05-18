@@ -147,7 +147,7 @@ class KrakenClient:
         xstock_symbols = extract_xstock_perp_symbols(result.json_data)
         if len(xstock_symbols) < 3:
             symbols = extract_symbols(result.json_data)
-            xstock_symbols = [s for s in symbols if is_xstock_perp_symbol(s)]
+            xstock_symbols = [s for s in symbols if is_explicit_xstock_symbol(s)]
         if len(xstock_symbols) < 3:
             raise KrakenSymbolDiscoveryFailed(
                 f"Fewer than three xStock perpetual symbols discovered from Kraken output. Found: {xstock_symbols}"
@@ -358,6 +358,11 @@ def is_xstock_perp_symbol(symbol: str) -> bool:
         ("XSTOCK" in s or s.endswith("X") or ".X" in s or re.match(r"^PF_[A-Z0-9]+XUSD$", s) is not None)
         and ("PERP" in s or s.startswith("PF_") or s.startswith("PI_"))
     )
+
+
+def is_explicit_xstock_symbol(symbol: str) -> bool:
+    s = symbol.upper()
+    return "XSTOCK" in s or ".X" in s or s.endswith("_X") or s.endswith("-X")
 
 
 def extract_price_for_symbol(payload: Any, symbol: str) -> float | None:

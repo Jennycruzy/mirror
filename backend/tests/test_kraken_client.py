@@ -85,6 +85,17 @@ async def test_place_paper_order_rejects_invalid_side_before_cli_call():
     assert client.calls == []
 
 
+@pytest.mark.asyncio
+async def test_discover_symbols_does_not_treat_crypto_suffix_x_as_xstock():
+    client = RecordingKrakenClient(
+        Settings(),
+        responses=[{"tickers": [{"symbol": "PF_AVAXUSD", "pair": "AVAX:USD"}, {"symbol": "PF_GMXUSD", "pair": "GMX:USD"}]}],
+    )
+
+    with pytest.raises(Exception):
+        await client.discover_xstock_perp_symbols()
+
+
 def test_xstock_symbol_detection_matches_kraken_futures_symbols():
     assert is_xstock_perp_symbol("PF_AAPLXUSD")
     assert is_xstock_perp_symbol("PF_NVDAXUSD")

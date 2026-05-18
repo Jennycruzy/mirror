@@ -28,15 +28,15 @@ function AgentCard({ agent }: { agent: Agent }) {
   const latest = agent.latest_forecast;
 
   return (
-    <article className={`border ${theme.border} bg-slate-950`}>
+    <article className={`border ${theme.border} bg-slate-950/95 shadow-[0_0_26px_rgba(15,23,42,0.55)] transition-colors hover:bg-slate-900/80`}>
       <div className="relative">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-800 p-4">
           <div>
             <p className={`text-xs uppercase tracking-[0.35em] ${theme.text}`}>{agent.lineage}</p>
-            <h2 className="mt-2 font-mono text-xl font-semibold tracking-tight text-slate-50">v{agent.version}</h2>
+            <h2 className="mt-2 font-mono text-xl font-semibold tracking-tight text-slate-50 drop-shadow-[0_0_12px_rgba(248,250,252,0.18)]">MIRROR v{agent.version}</h2>
             <p className="mt-1 text-xs text-slate-500">{agent.name}</p>
           </div>
-          <span className={`px-2 py-1 text-xs uppercase tracking-[0.16em] ${theme.chip}`}>{agent.status}</span>
+          <span className={`border px-2 py-1 text-xs uppercase tracking-[0.16em] ${theme.chip} ${theme.border}`}>{agent.status}</span>
         </div>
 
         <div className="grid gap-px bg-slate-800 sm:grid-cols-3">
@@ -48,14 +48,14 @@ function AgentCard({ agent }: { agent: Agent }) {
         <div className="border-t border-slate-800 p-4">
           <div className="flex items-center justify-between gap-4">
             <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Signal</p>
-            {latest ? <span className="bg-slate-900 px-2 py-1 text-xs text-slate-300">{latest.status}</span> : null}
+            {latest ? <span className="border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300">{latest.status}</span> : null}
           </div>
           {latest ? (
             <div className="mt-3 grid gap-2 font-mono text-sm text-slate-300 sm:grid-cols-4">
               <span className="text-slate-100">{latest.ticker}</span>
               <span className={latest.predicted_direction === "long" ? "text-teal-300" : latest.predicted_direction === "short" ? "text-rose-300" : "text-slate-400"}>{String(latest.predicted_direction ?? "flat").toUpperCase()}</span>
               <span>{Math.round(latest.confidence * 100)}% confidence</span>
-              <span>{latest.will_trade ? "EXECUTE" : "HOLD"}</span>
+              <span className={latest.will_trade ? "text-amber-200" : "text-slate-500"}>{latest.will_trade ? "EXECUTE" : "HOLD"}</span>
             </div>
           ) : (
             <p className="mt-3 text-sm text-slate-500">No forecasts emitted yet.</p>
@@ -70,7 +70,7 @@ function AgentCard({ agent }: { agent: Agent }) {
             </span>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden bg-slate-900">
-            <div className={`h-full ${floorPct >= 80 ? "bg-teal-300" : "bg-amber-300"}`} style={{ width: `${floorPct}%` }} />
+            <div className={`h-full shadow-[0_0_14px_currentColor] ${floorPct >= 80 ? "bg-teal-300 text-teal-300" : "bg-amber-300 text-amber-300"}`} style={{ width: `${floorPct}%` }} />
           </div>
         </div>
 
@@ -90,8 +90,8 @@ function AgentCard({ agent }: { agent: Agent }) {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-slate-950 p-3">
-      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-600">{label}</p>
+    <div className="bg-slate-950/95 p-3">
+      <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-200/40">{label}</p>
       <p className="mt-2 font-mono text-lg font-semibold text-slate-100">{value}</p>
     </div>
   );

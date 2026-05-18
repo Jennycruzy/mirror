@@ -2,10 +2,10 @@ import type { BlueFinding } from "../lib/types";
 
 export function BlueFindingsPanel({ findings }: { findings: BlueFinding[] }) {
   return (
-    <section className="border border-blue-500/20 bg-slate-950/95">
-      <div className="flex items-center justify-between border-b border-slate-800 p-4">
-        <h2 className="font-mono text-lg font-semibold text-slate-100">Blue Team</h2>
-        <span className="bg-blue-500/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-blue-200">calibration attack</span>
+    <section className="mirror-panel border-blue-500/20">
+      <div className="flex items-center justify-between border-b border-blue-400/10 p-4">
+        <h2 className="font-mono text-lg font-semibold text-slate-100 drop-shadow-[0_0_14px_rgba(96,165,250,0.2)]">Blue Team</h2>
+        <span className="border border-blue-400/20 bg-blue-500/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-blue-200">calibration attack</span>
       </div>
       {findings.length === 0 ? (
         <div className="p-4 text-sm text-slate-500">
@@ -15,10 +15,10 @@ export function BlueFindingsPanel({ findings }: { findings: BlueFinding[] }) {
       ) : null}
       <div className="space-y-3 p-4">
         {findings.map((finding) => (
-          <article key={finding.id} className="border border-blue-500/10 bg-slate-900/70 p-4">
+          <article key={finding.id} className="border border-blue-500/20 bg-blue-950/15 p-4 shadow-[inset_0_0_24px_rgba(30,64,175,0.12)]">
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-400">n={finding.sample_size}</span>
-              <span className="bg-blue-500/10 px-2 py-1 text-xs text-blue-200">{finding.status}</span>
+              <span className="border border-blue-400/20 bg-blue-500/10 px-2 py-1 text-xs text-blue-200">{finding.status}</span>
             </div>
             <p className="mt-2 text-slate-200">{finding.suggested_failure_mode}</p>
             <p className="mt-2 text-xs text-blue-200/80">{finding.suggested_fix_direction}</p>

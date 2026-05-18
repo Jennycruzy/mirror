@@ -3,18 +3,18 @@ import type { MirrorEvent } from "../lib/types";
 export function ActivityFeed({ events }: { events: MirrorEvent[] }) {
   const visibleEvents = events.filter((event) => event.kind !== "heartbeat");
   return (
-    <section className="border border-slate-800 bg-slate-950/95">
-      <div className="flex items-center justify-between border-b border-slate-800 p-4">
-        <h2 className="font-mono text-lg font-semibold text-slate-100">Event Tape</h2>
+    <section className="mirror-panel">
+      <div className="flex items-center justify-between border-b border-cyan-400/10 p-4">
+        <h2 className="font-mono text-lg font-semibold text-slate-100 drop-shadow-[0_0_14px_rgba(34,211,238,0.2)]">Event Tape</h2>
         <div className="flex items-center gap-2">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300" />
-          <span className="bg-slate-900 px-3 py-1 text-xs uppercase tracking-[0.16em] text-slate-500">stream</span>
+          <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.8)]" />
+          <span className="border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-cyan-200">stream</span>
         </div>
       </div>
       <div className="max-h-96 overflow-auto text-sm">
         {visibleEvents.length === 0 ? <p className="p-4 text-slate-500">Awaiting execution, forecast, and calibration events.</p> : null}
         {visibleEvents.map((event, index) => (
-          <article key={`${event.id ?? event.kind}-${index}`} className="border-b border-slate-900 p-3 hover:bg-slate-900/60">
+          <article key={`${event.id ?? event.kind}-${index}`} className="border-b border-slate-900 p-3 hover:bg-cyan-950/20">
             <div className="flex items-center justify-between gap-3">
               <span className="font-mono text-slate-200">{labelFor(event.kind)}</span>
               <span className={severityClass(event.severity)}>{event.severity ?? "info"}</span>
@@ -29,9 +29,9 @@ export function ActivityFeed({ events }: { events: MirrorEvent[] }) {
 }
 
 function severityClass(severity?: string) {
-  if (severity === "error") return "bg-rose-500/10 px-2 py-1 text-xs text-rose-200";
-  if (severity === "warning") return "bg-amber-500/10 px-2 py-1 text-xs text-amber-200";
-  return "bg-teal-500/10 px-2 py-1 text-xs text-teal-200";
+  if (severity === "error") return "border border-rose-400/20 bg-rose-500/10 px-2 py-1 text-xs text-rose-200";
+  if (severity === "warning") return "border border-amber-400/20 bg-amber-500/10 px-2 py-1 text-xs text-amber-200";
+  return "border border-teal-400/20 bg-teal-500/10 px-2 py-1 text-xs text-teal-200";
 }
 
 function labelFor(kind: string) {

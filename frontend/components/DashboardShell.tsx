@@ -88,17 +88,24 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
   const mode = data.paperStatus?.status?.mode ?? "unknown";
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#132235_0,#05070b_34%,#03040a_100%)] px-4 py-4 text-slate-100 lg:px-6">
-      <header className="mb-4 border border-cyan-500/20 bg-slate-950/95 shadow-[0_0_40px_rgba(34,211,238,0.07)]">
-        <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="text-sm font-semibold tracking-[0.5em] text-amber-300">MIRROR</p>
-            <span className="h-5 w-px bg-slate-800" />
-            <h1 className="text-lg font-semibold tracking-tight text-slate-50">AI Trading Terminal</h1>
-            <span className="rounded bg-slate-900 px-2 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{latestTicker}</span>
-            <span className={latestDirection === "long" ? "rounded bg-teal-500/10 px-2 py-1 text-xs uppercase tracking-[0.18em] text-teal-200" : latestDirection === "short" ? "rounded bg-rose-500/10 px-2 py-1 text-xs uppercase tracking-[0.18em] text-rose-200" : "rounded bg-slate-800 px-2 py-1 text-xs uppercase tracking-[0.18em] text-slate-300"}>
+    <main className="min-h-screen bg-[radial-gradient(circle_at_15%_0%,rgba(20,184,166,0.22),transparent_27%),radial-gradient(circle_at_80%_0%,rgba(245,158,11,0.14),transparent_28%),linear-gradient(180deg,#020617_0%,#030712_48%,#020617_100%)] px-4 py-4 text-slate-100 lg:px-6">
+      <header className="mirror-panel mirror-scanline mb-4">
+        <div className="flex flex-col gap-4 border-b border-cyan-400/10 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="leading-none">
+              <p className="bg-gradient-to-r from-amber-200 via-cyan-200 to-teal-300 bg-clip-text font-mono text-5xl font-black uppercase tracking-[0.12em] text-transparent drop-shadow-[0_0_20px_rgba(34,211,238,0.35)] md:text-6xl">
+                MIRROR
+              </p>
+              <p className="mt-1 text-[10px] uppercase tracking-[0.48em] text-cyan-300/80">Adaptive AI Trading Terminal</p>
+            </div>
+            <span className="hidden h-12 w-px bg-cyan-400/20 md:block" />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-cyan-100">{latestTicker}</span>
+              <span className={latestDirection === "long" ? "border border-teal-400/30 bg-teal-500/15 px-3 py-1 text-xs uppercase tracking-[0.18em] text-teal-200 shadow-[0_0_18px_rgba(45,212,191,0.16)]" : latestDirection === "short" ? "border border-rose-400/30 bg-rose-500/15 px-3 py-1 text-xs uppercase tracking-[0.18em] text-rose-200 shadow-[0_0_18px_rgba(251,113,133,0.16)]" : "border border-slate-700 bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-300"}>
               signal {latestDirection}
             </span>
+              <span className="border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-amber-200">PnL objective</span>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.16em]">
             <span className={error ? "text-rose-300" : "text-teal-300"}>{error ? "degraded" : "connected"}</span>
@@ -106,7 +113,7 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
             <span className="text-slate-400">{lastUpdated ? `sync ${lastUpdated}` : "awaiting stream"}</span>
           </div>
         </div>
-        <div className="grid gap-px bg-slate-800 md:grid-cols-4 xl:grid-cols-7">
+        <div className="grid gap-px bg-cyan-400/10 md:grid-cols-4 xl:grid-cols-7">
           <TerminalStat label="Portfolio" value={money(paperEquity)} />
           <TerminalStat label="Net PnL" value={money(paperPnl)} tone={(paperPnl ?? 0) >= 0 ? "good" : "bad"} />
           <TerminalStat label="Orders" value={totalTrades} />
@@ -115,7 +122,7 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
           <TerminalStat label="Patches" value={`${patchesPassed}/${patchesRejected}`} />
           <TerminalStat label="Crossovers" value={crossovers} />
         </div>
-        <div className="grid gap-px bg-slate-800 border-t border-slate-800 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid gap-px border-t border-cyan-400/10 bg-cyan-400/10 md:grid-cols-2 xl:grid-cols-6">
           <TerminalStat label="Execution Mode" value={String(mode).toUpperCase()} />
           <TerminalStat label="Open Trades" value={openTrades.length} />
           <TerminalStat label="Long / Short" value={`${longCount}/${shortCount}`} />
@@ -125,7 +132,7 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
         </div>
       </header>
 
-      {error ? <div className="mb-4 border border-rose-500/50 bg-rose-950/40 p-3 text-sm text-rose-100">{error}</div> : null}
+      {error ? <div className="mb-4 border border-rose-500/50 bg-rose-950/40 p-3 text-sm text-rose-100 shadow-[0_0_30px_rgba(244,63,94,0.12)]">{error}</div> : null}
 
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-4">
@@ -145,10 +152,15 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
 }
 
 function TerminalStat({ label, value, tone }: { label: string; value: string | number; tone?: "good" | "bad" }) {
-  const valueClass = tone === "good" ? "text-teal-300" : tone === "bad" ? "text-rose-300" : "text-slate-50";
+  const valueClass =
+    tone === "good"
+      ? "text-teal-300 drop-shadow-[0_0_12px_rgba(45,212,191,0.35)]"
+      : tone === "bad"
+        ? "text-rose-300 drop-shadow-[0_0_12px_rgba(251,113,133,0.28)]"
+        : "text-slate-50";
   return (
-    <div className="bg-slate-950 px-4 py-3">
-      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-600">{label}</p>
+    <div className="bg-slate-950/95 px-4 py-3 transition-colors hover:bg-slate-900/90">
+      <p className="text-[10px] uppercase tracking-[0.22em] text-cyan-200/45">{label}</p>
       <p className={`mt-1 font-mono text-xl font-semibold ${valueClass}`}>{value}</p>
     </div>
   );

@@ -237,9 +237,16 @@ async def evaluate_tournament_risk(state: RedState, strategy, forecast_obj: RedF
     spread_bps = compute_spread_bps(market)
     volume_quote = parse_market_float(market.get("volumeQuote")) or 0.0
     confidence_floor = max(settings.tournament_min_confidence, strategy.mutable.entry_confidence_threshold)
+    direction = "buy" if forecast_obj.predicted_direction == "long" else "sell"
 
     if forecast_obj.confidence < confidence_floor and forecast_obj.position_size_usd > strategy.locked.scout_size_usd:
         return RiskDecision(False, "confidence below tournament minimum")
+    trend_bps = await trend_bps_for_symbol(state)
+    if trend_bps is not None and settings.tournament_min_trend_bps > 0:
+        if forecast_obj.predicted_direction == "long" and trend_bps < settings.tournament_min_trend_bps:
+            return RiskDecision(False, f"long rejected by trend filter ({trend_bps:.2f} bps)")
+        if forecast_obj.predicted_direction == "short" and trend_bps > -settings.tournament_min_trend_bps:
+            return RiskDecision(False, f"short rejected by trend filter ({trend_bps:.2f} bps)")
     spread_cap_bps = spread_cap_for_symbol(settings, state["ticker"], strategy.mutable.tournament_max_spread_bps)
     if spread_bps is not None and spread_bps > spread_cap_bps:
         return RiskDecision(False, f"spread exceeds tournament maximum ({spread_bps:.2f} > {spread_cap_bps:.2f} bps)")
@@ -271,7 +278,20 @@ async def evaluate_tournament_risk(state: RedState, strategy, forecast_obj: RedF
             )
             or 0.0
         )
+        same_side_count = int(
+            await session.scalar(
+                select(func.count()).select_from(Trade).where(
+                    Trade.status == "open",
+                    Trade.mode == settings.kraken_execution_mode,
+                    Trade.ticker == state["ticker"],
+                    Trade.side == direction,
+                )
+            )
+            or 0
+        )
     account_equity_usd = settings.tournament_account_equity_usd
+    if same_side_count >= settings.tournament_max_same_side_symbol_positions:
+        return RiskDecision(False, "same-direction symbol exposure already open")
     max_symbol_notional = account_equity_usd * (settings.tournament_max_symbol_exposure_pct / 100.0)
     if symbol_notional + forecast_obj.position_size_usd > max_symbol_notional:
         return RiskDecision(False, "symbol exposure exceeds tournament limit")
@@ -301,10 +321,39 @@ async def evaluate_tournament_risk(state: RedState, strategy, forecast_obj: RedF
 def compute_spread_bps(market: dict[str, Any]) -> float | None:
     bid = parse_market_float(market.get("bid"))
     ask = parse_market_float(market.get("ask"))
-    price = parse_market_float(market.get("price")) or parse_market_float(market.get("last"))
+    price = parse_market_float(market.get("markPrice")) or parse_market_float(market.get("price")) or parse_market_float(market.get("last"))
     if bid is None or ask is None or price is None or price <= 0 or ask < bid:
         return None
-    return ((ask - bid) / price) * 10000.0
+    spread = ((ask - bid) / price) * 10000.0
+    bid_deviation = abs((price - bid) / price) * 10000.0
+    ask_deviation = abs((ask - price) / price) * 10000.0
+    if spread > 300 or bid_deviation > 300 or ask_deviation > 300:
+        return None
+    return spread
+
+
+async def trend_bps_for_symbol(state: RedState) -> float | None:
+    settings = state["settings"]
+    market = state.get("market_state") or {}
+    change24h = parse_market_float(market.get("change24h"))
+    if change24h is not None:
+        return change24h * 100.0
+    current_price = state.get("market_price")
+    if current_price is None or current_price <= 0:
+        return None
+    since = datetime.now(UTC) - timedelta(minutes=settings.tournament_trend_lookback_minutes)
+    async with state["session_factory"]() as session:
+        previous = (
+            await session.execute(
+                select(MarketTick)
+                .where(MarketTick.ticker == state["ticker"], MarketTick.observed_at <= since)
+                .order_by(MarketTick.observed_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    if previous is None or previous.price <= 0:
+        return None
+    return ((current_price - previous.price) / previous.price) * 10000.0
 
 
 def spread_cap_for_symbol(settings: Settings, symbol: str, strategy_cap_bps: float) -> float:

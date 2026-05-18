@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,9 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
     if settings.mirror_mode != "tournament" or not settings.trading_enabled:
         return 0
 
+    kraken = KrakenClient(settings)
+    await record_equity_snapshot(session, settings, kraken)
+
     trades = (
         await session.execute(
             select(Trade)
@@ -23,7 +26,6 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
     if not trades:
         return 0
 
-    kraken = KrakenClient(settings)
     if settings.kraken_execution_mode == "spot_paper":
         symbols = sorted({trade.ticker for trade in trades})
         ticker_payload = {symbol: await kraken.spot_ticker(symbol) for symbol in symbols}
@@ -42,8 +44,9 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
             continue
         entry = trade.entry_price or price
         pnl_pct = leveraged_pnl_pct(trade.side, entry, price, trade.leverage)
-        reason = exit_reason(forecast, trade, pnl_pct)
+        reason = exit_reason(forecast, trade, pnl_pct, settings=settings)
         if reason is None:
+            update_exit_state(trade, pnl_pct)
             continue
 
         close_side = "sell" if trade.side == "buy" else "buy"
@@ -83,14 +86,41 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
     return closed_count
 
 
-def exit_reason(forecast: Forecast, trade: Trade, pnl_pct: float) -> str | None:
+def exit_reason(forecast: Forecast, trade: Trade, pnl_pct: float, settings: Settings | None = None) -> str | None:
+    min_hold_seconds = settings.tournament_min_hold_seconds if settings else 0
+    if min_hold_seconds and (datetime.now(UTC) - trade.opened_at).total_seconds() < min_hold_seconds:
+        return None
     if pnl_pct >= forecast.take_profit_pct:
-        return "take_profit"
+        update_exit_state(trade, pnl_pct)
+        return None
     if pnl_pct <= -forecast.stop_loss_pct:
         return "stop_loss"
-    if forecast.resolves_at <= datetime.now(UTC):
+    exit_state = update_exit_state(trade, pnl_pct)
+    profit_lock = settings.tournament_profit_lock_pct if settings else 0.0
+    trailing_giveback = settings.tournament_trailing_giveback_pct if settings else 0.0
+    max_seen = float(exit_state.get("max_pnl_pct_seen", pnl_pct))
+    if profit_lock > 0 and trailing_giveback > 0 and max_seen >= profit_lock and pnl_pct > 0 and pnl_pct <= max_seen - trailing_giveback:
+        return "trailing_profit_lock"
+    now = datetime.now(UTC)
+    if forecast.resolves_at <= now:
+        if pnl_pct > 0 and settings and settings.tournament_winner_extension_minutes:
+            if now <= forecast.resolves_at + timedelta(minutes=settings.tournament_winner_extension_minutes):
+                return None
         return "time_stop"
     return None
+
+
+def update_exit_state(trade: Trade, pnl_pct: float) -> dict:
+    raw = dict(trade.raw_kraken_response or {})
+    state = dict(raw.get("exit_state") or {})
+    previous = state.get("max_pnl_pct_seen")
+    if previous is None or pnl_pct > float(previous):
+        state["max_pnl_pct_seen"] = pnl_pct
+        state["max_pnl_seen_at"] = datetime.now(UTC).isoformat()
+    state["last_pnl_pct"] = pnl_pct
+    raw["exit_state"] = state
+    trade.raw_kraken_response = raw
+    return state
 
 
 def leveraged_pnl_pct(side: str, entry_price: float, exit_price: float, leverage: int) -> float:
@@ -100,3 +130,32 @@ def leveraged_pnl_pct(side: str, entry_price: float, exit_price: float, leverage
 
 def estimated_pnl_usd(side: str, entry_price: float, exit_price: float, size_usd: float, leverage: int) -> float:
     return (leveraged_pnl_pct(side, entry_price, exit_price, leverage) / 100.0) * size_usd
+
+
+async def record_equity_snapshot(session: AsyncSession, settings: Settings, kraken: KrakenClient) -> None:
+    latest = (
+        await session.execute(
+            select(Event)
+            .where(Event.kind == "account_equity_snapshot")
+            .order_by(Event.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest and latest.created_at and (datetime.now(UTC) - latest.created_at).total_seconds() < settings.tournament_equity_snapshot_min_seconds:
+        return
+    status = await kraken.trading_status()
+    account = status.get("status", {}) if isinstance(status, dict) else {}
+    session.add(
+        Event(
+            agent_id=None,
+            kind="account_equity_snapshot",
+            severity="info",
+            payload_json={
+                "equity": account.get("equity"),
+                "net_pnl": account.get("pnl"),
+                "available_margin": account.get("available_margin"),
+                "open_positions": account.get("open_positions"),
+                "baseline_equity": settings.tournament_account_equity_usd,
+            },
+        )
+    )

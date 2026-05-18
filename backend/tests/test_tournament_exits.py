@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from mirror.models import Forecast, Trade
 from mirror.tournament.exits import estimated_pnl_usd, exit_reason, leveraged_pnl_pct
+from mirror.config import Settings
 
 
 def make_forecast(take_profit_pct: float = 1.0, stop_loss_pct: float = 0.5) -> Forecast:
@@ -57,11 +58,31 @@ def test_leveraged_pnl_pct_long_and_short():
 def test_exit_reason_take_profit_and_stop_loss():
     forecast = make_forecast()
     trade = make_trade()
-    assert exit_reason(forecast, trade, 1.2) == "take_profit"
+    assert exit_reason(forecast, trade, 1.2) is None
     assert exit_reason(forecast, trade, -0.6) == "stop_loss"
     assert exit_reason(forecast, trade, 0.2) is None
 
 
+def test_exit_reason_trailing_profit_lock_after_giveback():
+    forecast = make_forecast(take_profit_pct=0.5)
+    trade = make_trade()
+    settings = Settings(tournament_profit_lock_pct=0.35, tournament_trailing_giveback_pct=0.18, tournament_min_hold_seconds=0)
+
+    assert exit_reason(forecast, trade, 0.6, settings=settings) is None
+    assert exit_reason(forecast, trade, 0.39, settings=settings) == "trailing_profit_lock"
+    assert exit_reason(forecast, trade, -0.1, settings=settings) is None
+
+
+def test_exit_reason_extends_winning_time_stop():
+    now = datetime.now(UTC)
+    forecast = make_forecast()
+    forecast.resolves_at = now - timedelta(minutes=1)
+    trade = make_trade()
+    settings = Settings(tournament_winner_extension_minutes=30, tournament_min_hold_seconds=0)
+
+    assert exit_reason(forecast, trade, 0.2, settings=settings) is None
+    assert exit_reason(forecast, trade, -0.1, settings=settings) == "time_stop"
+
+
 def test_estimated_pnl_usd_uses_leverage_and_notional():
     assert estimated_pnl_usd("buy", 100, 101, 400, 2) == 8
-

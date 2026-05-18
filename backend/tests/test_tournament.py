@@ -2,7 +2,8 @@ from mirror.agents.strategy_schema import RedForecast, initial_strategy_yaml, pa
 from mirror.backtest.replay import ReplayResult
 from mirror.tournament.gate import evaluate_tournament_gate
 from mirror.tournament.ranking import SymbolOpportunity, rank_opportunities
-from mirror.tournament.risk import validate_tournament_trade
+from mirror.tournament.risk import RiskDecision, validate_tournament_trade
+from mirror.orchestrator.graph import compute_spread_bps
 
 
 def test_tournament_gate_passes_pnl_improvement_with_guardrails():
@@ -88,3 +89,14 @@ def test_rank_opportunities_returns_highest_score_first():
         limit=1,
     )
     assert [item.symbol for item in ranked] == ["PF_HIGH"]
+
+
+def test_risk_decision_can_explain_same_side_exposure():
+    decision = RiskDecision(False, "same-direction symbol exposure already open")
+    assert not decision.allowed
+    assert "same-direction" in decision.reason
+
+
+def test_compute_spread_ignores_distorted_demo_quote():
+    assert compute_spread_bps({"markPrice": 2144.0, "bid": 200, "ask": 2120.55}) is None
+    assert compute_spread_bps({"markPrice": 2144.0, "bid": 2143.5, "ask": 2144.5}) < 5

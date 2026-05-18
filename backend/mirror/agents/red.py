@@ -45,11 +45,14 @@ def abstention_forecast(horizon_minutes: int) -> RedForecast:
     )
 
 
-async def run_red_once(session: AsyncSession, settings: Settings, lineage: str) -> Forecast:
+async def run_red_once(session: AsyncSession, settings: Settings, lineage: str, ticker_override: str | None = None) -> Forecast:
     from mirror.db import SessionLocal
     from mirror.orchestrator.graph import build_red_graph
 
-    result = await build_red_graph().ainvoke({"agent_lineage": lineage, "settings": settings, "session_factory": SessionLocal})
+    state = {"agent_lineage": lineage, "settings": settings, "session_factory": SessionLocal}
+    if ticker_override:
+        state["ticker_override"] = ticker_override
+    result = await build_red_graph().ainvoke(state)
     forecast = await session.get(Forecast, result["forecast_id"])
     if forecast is None:
         raise RuntimeError(f"LangGraph completed without persisted forecast {result['forecast_id']}")

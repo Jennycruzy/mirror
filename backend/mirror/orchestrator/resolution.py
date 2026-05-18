@@ -5,9 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from typing_extensions import TypedDict
 
-from mirror.agents.red import extract_price_for_symbol
 from mirror.calibration.brier import brier_score
-from mirror.clients.kraken import KrakenClient, extract_spot_price
+from mirror.clients.kraken import KrakenClient, extract_price_for_symbol, extract_spot_price
 from mirror.config import Settings
 from mirror.models import Event, Forecast, MarketTick
 
@@ -51,6 +50,8 @@ async def resolve_due_forecasts(state: ResolutionState) -> ResolutionState:
             else:
                 current_price = extract_price_for_symbol(ticker_payload, forecast.ticker)
             if current_price is None:
+                forecast.status = "resolution_failed"
+                forecast.resolved_at = observed_at
                 session.add(
                     Event(
                         agent_id=forecast.agent_id,
@@ -79,6 +80,8 @@ async def resolve_due_forecasts(state: ResolutionState) -> ResolutionState:
                     )
                 ).scalar_one_or_none()
             if start_tick is None:
+                forecast.status = "resolution_failed"
+                forecast.resolved_at = observed_at
                 session.add(
                     Event(
                         agent_id=forecast.agent_id,

@@ -55,14 +55,14 @@ async def run_blue_scan(session: AsyncSession, settings: Settings, lineage: str)
     ).scalars().all()
 
     strata = stratify_forecasts(forecasts)
-    eligible = [summary for summary in strata if summary["sample_size"] >= 15]
+    eligible = [summary for summary in strata if summary["sample_size"] >= settings.blue_min_sample_size]
     if not eligible:
         session.add(
             Event(
                 agent_id=agent.id,
                 kind="blue_scan_no_eligible_strata",
                 severity="info",
-                payload_json={"resolved_samples": len(forecasts), "eligible_min_n": 15},
+                payload_json={"resolved_samples": len(forecasts), "eligible_min_n": settings.blue_min_sample_size},
             )
         )
         await session.commit()
@@ -107,7 +107,7 @@ async def run_blue_scan(session: AsyncSession, settings: Settings, lineage: str)
         suggested_failure_mode=payload.suggested_failure_mode,
         suggested_fix_direction=payload.suggested_fix_direction,
         raw_blue_response=payload.model_dump(),
-        status="pending" if payload.brier_gap >= 0.08 and payload.sample_size >= 20 else "stored",
+        status="pending" if payload.brier_gap >= settings.blue_pending_brier_gap and payload.sample_size >= settings.blue_pending_sample_size else "stored",
     )
     session.add(finding)
     await session.flush()
@@ -135,9 +135,20 @@ async def run_blue_scan(session: AsyncSession, settings: Settings, lineage: str)
 def stratify_forecasts(forecasts: list[Forecast]) -> list[dict[str, Any]]:
     groups: dict[str, list[Forecast]] = {}
     for forecast in forecasts:
-        tags = forecast.regime_tags or ["untagged"]
-        key = "|".join(sorted(tags))
-        groups.setdefault(key, []).append(forecast)
+        ticker = forecast.ticker or "unknown"
+        direction = forecast.predicted_direction or "flat"
+        confidence_bucket = confidence_bucket_label(float(forecast.confidence or 0.5))
+        tags = normalized_regime_tags(forecast.regime_tags or [])
+        group_keys = {
+            "all",
+            f"ticker:{ticker}",
+            f"direction:{direction}",
+            f"confidence:{confidence_bucket}",
+        }
+        for tag in tags:
+            group_keys.add(f"tag:{tag}")
+        for group_key in group_keys:
+            groups.setdefault(group_key, []).append(forecast)
 
     summaries: list[dict[str, Any]] = []
     for key, rows in groups.items():
@@ -148,7 +159,7 @@ def stratify_forecasts(forecasts: list[Forecast]) -> list[dict[str, Any]]:
         realized_accuracy = correct / len(rows)
         summaries.append(
             {
-                "regime_context": {"tags": key.split("|")},
+                "regime_context": regime_context_from_group_key(key),
                 "sample_size": len(rows),
                 "predicted_confidence_avg": predicted_avg,
                 "realized_accuracy": realized_accuracy,
@@ -167,3 +178,39 @@ def forecast_was_directionally_correct(forecast: Forecast) -> bool:
     if forecast.predicted_direction == "short":
         return forecast.realized_direction == "down"
     return False
+
+
+def normalized_regime_tags(tags: list[str]) -> list[str]:
+    normalized: set[str] = set()
+    for tag in tags:
+        lowered = tag.lower()
+        if "high" in lowered and "vol" in lowered:
+            normalized.add("volatility_high")
+        elif "low" in lowered and "vol" in lowered:
+            normalized.add("volatility_low")
+        elif "trend" in lowered or "momentum" in lowered:
+            normalized.add("trend")
+        elif "reversion" in lowered or "mean" in lowered:
+            normalized.add("mean_reversion")
+        elif "scout" in lowered:
+            normalized.add("scout")
+        elif "weekend" in lowered:
+            normalized.add("weekend")
+        elif "weekday" in lowered:
+            normalized.add("weekday")
+    return sorted(normalized)
+
+
+def confidence_bucket_label(confidence: float) -> str:
+    if confidence >= 0.75:
+        return "high"
+    if confidence >= 0.62:
+        return "medium"
+    return "low"
+
+
+def regime_context_from_group_key(group_key: str) -> dict[str, Any]:
+    if group_key == "all":
+        return {"scope": "all"}
+    kind, value = group_key.split(":", 1)
+    return {kind: value}

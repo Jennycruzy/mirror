@@ -60,6 +60,25 @@ def test_tournament_risk_allows_low_confidence_scout_sized_trade():
     assert result.allowed
 
 
+def test_tournament_risk_uses_absolute_expected_move_for_shorts():
+    strategy = parse_strategy_yaml(initial_strategy_yaml("red-a"))
+    forecast = RedForecast(
+        predicted_direction="short",
+        predicted_magnitude_bps=-50,
+        confidence=0.7,
+        time_horizon_minutes=60,
+        regime_tags=[],
+        will_trade=True,
+        position_size_usd=50,
+        leverage=1,
+        stop_loss_pct=1,
+        take_profit_pct=2,
+        reasoning="test",
+    )
+    result = validate_tournament_trade(strategy, forecast, min_confidence=0.68, max_position_risk_pct=3)
+    assert result.allowed
+
+
 def test_rank_opportunities_returns_highest_score_first():
     ranked = rank_opportunities(
         [

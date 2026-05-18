@@ -2,24 +2,25 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from mirror.agents.red import RED_FORECAST_SYSTEM_PROMPT, abstention_forecast, extract_order_id, extract_price_for_symbol, extract_record_for_symbol
+from mirror.agents.red import RED_FORECAST_SYSTEM_PROMPT, abstention_forecast, extract_order_id, extract_record_for_symbol
 from mirror.agents.strategy_schema import RedForecast, parse_strategy_yaml
 from mirror.calibration.brier import direction_to_probability_up
 from mirror.clients.featherless import FeatherlessClient
 from mirror.clients.gemini import GeminiClient
-from mirror.clients.kraken import KrakenClient, select_best_xstock_record, spot_ticker_record
+from mirror.clients.kraken import KrakenClient, extract_price_for_symbol, select_best_xstock_record, spot_ticker_record
 from mirror.config import Settings
 from mirror.errors import InferenceMalformedJSON
 from mirror.models import Agent, Event, Forecast, MarketTick, Trade
-from mirror.tournament.risk import validate_tournament_trade
+from mirror.tournament.risk import RiskDecision, validate_tournament_trade
 
 
 class RedState(TypedDict, total=False):
     agent_lineage: str
     settings: Settings
     session_factory: Any
+    ticker_override: str
     agent_id: str
     strategy_yaml: str
     ticker: str
@@ -47,9 +48,15 @@ async def fetch_market_state(state: RedState) -> RedState:
         ).scalar_one()
         strategy = parse_strategy_yaml(agent.strategy_yaml)
         if settings.kraken_execution_mode == "spot_paper":
-            ticker = settings.trading_pair
+            ticker = state.get("ticker_override") or default_spot_pair_for_lineage(settings, state["agent_lineage"])
             ticker_payload = await kraken.spot_ticker(ticker)
             selected_ticker = spot_ticker_record(ticker_payload, ticker)
+        elif settings.kraken_execution_mode == "account":
+            ticker = state.get("ticker_override") or default_futures_symbol_for_lineage(settings, state["agent_lineage"])
+            if not ticker:
+                raise RuntimeError("No configured futures symbols are available for account execution mode")
+            ticker_payload = (await kraken.run_json(["futures", "tickers", "-o", "json"])).json_data
+            selected_ticker = extract_record_for_symbol(ticker_payload, ticker) or {}
         else:
             ticker = strategy.locked.locked_tickers[0] if strategy.locked.locked_tickers else None
             if not ticker:
@@ -192,20 +199,14 @@ async def decide_action(state: RedState) -> RedState:
         forecast_obj = RedForecast.model_validate(payload)
         payload = apply_tournament_position_sizing(settings, strategy, forecast_obj, state)
         forecast_obj = RedForecast.model_validate(payload)
-        risk = validate_tournament_trade(
-            strategy,
-            forecast_obj,
-            min_confidence=settings.tournament_min_confidence,
-            max_position_risk_pct=settings.tournament_max_position_risk_pct,
-            max_concurrent_positions=settings.tournament_max_concurrent_positions,
-        )
+        risk = await evaluate_tournament_risk(state, strategy, forecast_obj)
         should_trade = risk.allowed
         payload = {**payload, "tournament_risk_decision": {"allowed": risk.allowed, "reason": risk.reason}}
     return {**state, "forecast_payload": payload, "should_trade": should_trade}
 
 
 def apply_tournament_position_sizing(settings: Settings, strategy, forecast_obj: RedForecast, state: RedState) -> dict[str, Any]:
-    equity = 10_000.0
+    equity = settings.tournament_account_equity_usd
     market = state.get("market_state") or {}
     confidence_edge = max(forecast_obj.confidence - 0.5, 0.0)
     equity_pct = settings.tournament_scout_equity_pct
@@ -219,13 +220,117 @@ def apply_tournament_position_sizing(settings: Settings, strategy, forecast_obj:
     notional = equity * (equity_pct / 100.0) * min(max(strategy.mutable.position_size_multiplier, 0.25), 2.0)
     max_symbol_notional = equity * (settings.tournament_max_symbol_exposure_pct / 100.0)
     notional = min(max(notional, strategy.locked.scout_size_usd), max_symbol_notional)
-    leverage = min(max(forecast_obj.leverage, 2), strategy.mutable.max_leverage)
+    leverage = 1 if settings.kraken_execution_mode == "spot_paper" else min(max(forecast_obj.leverage, 2), strategy.mutable.max_leverage)
+    risk_notional_cap = equity * (settings.tournament_max_position_risk_pct / 100.0) / max(leverage, 1)
+    notional = min(notional, int(risk_notional_cap * 100) / 100)
     return {
         **forecast_obj.model_dump(),
         "position_size_usd": round(notional, 2),
         "leverage": leverage,
         "reasoning": f"{forecast_obj.reasoning} Tournament sizing set notional to ${notional:.2f} at {leverage}x.",
     }
+
+
+async def evaluate_tournament_risk(state: RedState, strategy, forecast_obj: RedForecast):
+    settings = state["settings"]
+    market = state.get("market_state") or {}
+    spread_bps = compute_spread_bps(market)
+    volume_quote = parse_market_float(market.get("volumeQuote")) or 0.0
+    confidence_floor = max(settings.tournament_min_confidence, strategy.mutable.entry_confidence_threshold)
+
+    if forecast_obj.confidence < confidence_floor and forecast_obj.position_size_usd > strategy.locked.scout_size_usd:
+        return RiskDecision(False, "confidence below tournament minimum")
+    spread_cap_bps = spread_cap_for_symbol(settings, state["ticker"], strategy.mutable.tournament_max_spread_bps)
+    if spread_bps is not None and spread_bps > spread_cap_bps:
+        return RiskDecision(False, f"spread exceeds tournament maximum ({spread_bps:.2f} > {spread_cap_bps:.2f} bps)")
+    if (
+        settings.tournament_min_quote_volume > 0
+        and volume_quote
+        and volume_quote < settings.tournament_min_quote_volume
+        and forecast_obj.position_size_usd > strategy.locked.scout_size_usd
+    ):
+        return RiskDecision(False, "liquidity below tournament minimum")
+
+    async with state["session_factory"]() as session:
+        open_positions_count = int(
+            await session.scalar(
+                select(func.count()).select_from(Trade).where(
+                    Trade.status == "open",
+                    Trade.mode == settings.kraken_execution_mode,
+                )
+            )
+            or 0
+        )
+        symbol_notional = float(
+            await session.scalar(
+                select(func.coalesce(func.sum(Trade.size_usd), 0.0)).where(
+                    Trade.status == "open",
+                    Trade.mode == settings.kraken_execution_mode,
+                    Trade.ticker == state["ticker"],
+                )
+            )
+            or 0.0
+        )
+    account_equity_usd = settings.tournament_account_equity_usd
+    max_symbol_notional = account_equity_usd * (settings.tournament_max_symbol_exposure_pct / 100.0)
+    if symbol_notional + forecast_obj.position_size_usd > max_symbol_notional:
+        return RiskDecision(False, "symbol exposure exceeds tournament limit")
+    strategy_for_risk = strategy.model_copy(
+        update={
+            "mutable": strategy.mutable.model_copy(
+                update={
+                    "tournament_min_expected_move_bps": min(
+                        strategy.mutable.tournament_min_expected_move_bps,
+                        settings.tournament_min_expected_move_bps,
+                    )
+                }
+            )
+        }
+    )
+    return validate_tournament_trade(
+        strategy_for_risk,
+        forecast_obj,
+        min_confidence=confidence_floor,
+        max_position_risk_pct=settings.tournament_max_position_risk_pct,
+        account_equity_usd=account_equity_usd,
+        open_positions_count=open_positions_count,
+        max_concurrent_positions=settings.tournament_max_concurrent_positions,
+    )
+
+
+def compute_spread_bps(market: dict[str, Any]) -> float | None:
+    bid = parse_market_float(market.get("bid"))
+    ask = parse_market_float(market.get("ask"))
+    price = parse_market_float(market.get("price")) or parse_market_float(market.get("last"))
+    if bid is None or ask is None or price is None or price <= 0 or ask < bid:
+        return None
+    return ((ask - bid) / price) * 10000.0
+
+
+def spread_cap_for_symbol(settings: Settings, symbol: str, strategy_cap_bps: float) -> float:
+    return settings.tournament_symbol_spread_caps_map().get(symbol.upper(), strategy_cap_bps)
+
+
+def default_spot_pair_for_lineage(settings: Settings, lineage: str) -> str:
+    pairs = settings.trading_pairs_list()
+    lineages = ["red-a", "red-b", "red-c", "red-d"]
+    try:
+        idx = lineages.index(lineage)
+    except ValueError:
+        idx = 0
+    return pairs[idx % len(pairs)]
+
+
+def default_futures_symbol_for_lineage(settings: Settings, lineage: str) -> str | None:
+    symbols = settings.trading_futures_symbols_list()
+    if not symbols:
+        return None
+    lineages = ["red-a", "red-b", "red-c", "red-d"]
+    try:
+        idx = lineages.index(lineage)
+    except ValueError:
+        idx = 0
+    return symbols[idx % len(symbols)]
 
 
 async def execute_trade(state: RedState) -> RedState:

@@ -45,7 +45,7 @@ class ChainClient:
             {
                 "from": account.address,
                 "chainId": self.settings.base_sepolia_chain_id,
-                "nonce": await self.w3.eth.get_transaction_count(account.address),
+                "nonce": await self.w3.eth.get_transaction_count(account.address, "pending"),
             }
         )
         signed = account.sign_transaction(tx)

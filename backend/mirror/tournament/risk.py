@@ -25,7 +25,7 @@ def validate_tournament_trade(
         return RiskDecision(False, "forecast abstained")
     if forecast.confidence < min_confidence and forecast.position_size_usd > strategy.locked.scout_size_usd:
         return RiskDecision(False, "confidence below tournament minimum")
-    if forecast.predicted_magnitude_bps < strategy.mutable.tournament_min_expected_move_bps:
+    if abs(forecast.predicted_magnitude_bps) < strategy.mutable.tournament_min_expected_move_bps:
         return RiskDecision(False, "expected move below tournament minimum")
     if forecast.leverage > strategy.mutable.max_leverage:
         return RiskDecision(False, "leverage exceeds strategy max")

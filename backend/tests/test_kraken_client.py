@@ -1,6 +1,6 @@
 import pytest
 
-from mirror.clients.kraken import KrakenClient, KrakenCommandResult, extract_spot_price, extract_xstock_perp_symbols, format_cli_number, is_xstock_perp_symbol, select_best_xstock_record, spot_ticker_record
+from mirror.clients.kraken import KrakenClient, KrakenCommandResult, extract_price_for_symbol, extract_spot_price, extract_xstock_perp_symbols, format_cli_number, futures_order_size, is_xstock_perp_symbol, normalize_account_status, select_best_xstock_record, spot_ticker_record, validate_order_response
 from mirror.config import Settings
 from mirror.errors import KrakenCliCommandFailed
 
@@ -136,6 +136,8 @@ def test_xstock_extraction_uses_pair_context_to_exclude_crypto():
 def test_spot_ticker_record_extracts_price_change_and_quote_volume():
     payload = {
         "BTC/USD": {
+            "a": ["76740.0", "1", "1.0"],
+            "b": ["76730.0", "1", "1.0"],
             "c": ["76736.2", "0.1"],
             "o": "77410.1",
             "p": ["76956.4", "77572.7"],
@@ -146,6 +148,8 @@ def test_spot_ticker_record_extracts_price_change_and_quote_volume():
     assert extract_spot_price(payload, "BTC/USD") == 76736.2
     record = spot_ticker_record(payload, "BTC/USD")
     assert record["symbol"] == "BTC/USD"
+    assert record["bid"] == 76730.0
+    assert record["ask"] == 76740.0
     assert record["change24h"] < 0
     assert record["volumeQuote"] > 100_000
 
@@ -161,3 +165,42 @@ def test_select_best_xstock_record_prefers_move_volume_and_spread():
     selected = select_best_xstock_record(payload, ["PF_AAPLXUSD", "PF_NVDAXUSD"])
     assert selected is not None
     assert selected.symbol == "PF_NVDAXUSD"
+
+
+def test_extract_price_for_symbol_uses_futures_mark_price_case_insensitively():
+    payload = {"tickers": [{"symbol": "PI_XBTUSD", "markPrice": "77250.5"}]}
+    assert extract_price_for_symbol(payload, "pi_xbtusd") == 77250.5
+
+
+def test_normalize_account_status_extracts_flex_equity_and_positions():
+    payload = {
+        "status": {"mode": "account"},
+        "accounts": {
+            "accounts": {
+                "flex": {
+                    "portfolioValue": "20655.67",
+                    "totalUnrealized": "-12.34",
+                    "availableMargin": "20000",
+                    "collateralValue": "20500",
+                }
+            }
+        },
+        "positions": {"openPositions": [{"symbol": "PI_XBTUSD"}]},
+    }
+
+    normalized = normalize_account_status(payload)
+
+    assert normalized["status"]["equity"] == 20655.67
+    assert normalized["status"]["pnl"] == -12.34
+    assert normalized["status"]["available_margin"] == 20000.0
+    assert normalized["positions"]["positions"] == [{"symbol": "PI_XBTUSD"}]
+
+
+def test_futures_order_size_uses_integer_contracts_for_inverse_perps():
+    instruments = {"instruments": [{"symbol": "PI_XBTUSD", "type": "futures_inverse", "contractSize": 1, "contractValueTradePrecision": 0}]}
+    assert futures_order_size("PI_XBTUSD", 310.31, 77_000, instruments) == 310.0
+
+
+def test_validate_order_response_rejects_invalid_size_envelope():
+    with pytest.raises(KrakenCliCommandFailed):
+        validate_order_response({"result": "success", "status": "invalidSize", "order_id": "x"})

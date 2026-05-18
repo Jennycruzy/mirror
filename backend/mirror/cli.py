@@ -18,7 +18,7 @@ from mirror.chain.reputation import execute_brier_feedback_job, verify_reputatio
 from mirror.clients.chain import ChainClient
 from mirror.clients.featherless import FeatherlessClient
 from mirror.clients.gemini import GeminiClient
-from mirror.clients.kraken import KrakenClient
+from mirror.clients.kraken import KrakenClient, extract_symbols
 from mirror.config import get_settings
 from mirror.db import Base, SessionLocal, create_all, engine
 from mirror.logging import configure_logging
@@ -73,24 +73,40 @@ async def _verify() -> dict:
         checks["kraken_installed"] = {"ok": False, "detail": str(exc)}
 
     try:
-        checks["kraken_paper_mode"] = {"ok": True, "detail": await kraken.verify_paper_mode()}
+        checks["kraken_execution_mode"] = {"ok": True, "detail": await kraken.verify_execution_mode()}
     except Exception as exc:
-        checks["kraken_paper_mode"] = {"ok": False, "detail": str(exc)}
+        checks["kraken_execution_mode"] = {"ok": False, "detail": str(exc)}
 
     try:
-        checks["kraken_xstock_symbols"] = {"ok": True, "detail": await kraken.discover_xstock_perp_symbols()}
+        if settings.kraken_execution_mode == "account":
+            payload = await kraken.futures_tickers()
+            available = set(extract_symbols(payload))
+            configured = settings.trading_futures_symbols_list()
+            missing = [symbol for symbol in configured if symbol not in available]
+            checks["kraken_symbol_universe"] = {"ok": not missing, "detail": {"configured": configured, "missing": missing}}
+        else:
+            checks["kraken_xstock_symbols"] = {"ok": True, "detail": await kraken.discover_xstock_perp_symbols()}
     except Exception as exc:
-        checks["kraken_xstock_symbols"] = {"ok": False, "detail": str(exc)}
+        if settings.kraken_execution_mode == "account":
+            checks["kraken_symbol_universe"] = {"ok": False, "detail": str(exc)}
+        else:
+            checks["kraken_xstock_symbols"] = {"ok": False, "detail": str(exc)}
 
     try:
         checks["featherless"] = {"ok": True, "detail": await FeatherlessClient(settings).verify()}
     except Exception as exc:
         checks["featherless"] = {"ok": False, "detail": str(exc)}
 
-    try:
-        checks["gemini"] = {"ok": True, "detail": await GeminiClient(settings).verify()}
-    except Exception as exc:
-        checks["gemini"] = {"ok": False, "detail": str(exc)}
+    if settings.patcher_provider.lower().strip() == "gemini" or settings.gemini_api_key:
+        try:
+            checks["gemini"] = {"ok": True, "detail": await GeminiClient(settings).verify()}
+        except Exception as exc:
+            checks["gemini"] = {"ok": False, "detail": str(exc)}
+    else:
+        checks["gemini"] = {
+            "ok": True,
+            "detail": f"skipped; PATCHER_PROVIDER={settings.patcher_provider} and Red/Blue use Featherless",
+        }
 
     try:
         chain = await ChainClient(settings).verify()

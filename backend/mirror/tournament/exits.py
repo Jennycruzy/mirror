@@ -3,8 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mirror.agents.red import extract_price_for_symbol
-from mirror.clients.kraken import KrakenClient, extract_spot_price
+from mirror.clients.kraken import KrakenClient, extract_price_for_symbol, extract_spot_price
 from mirror.config import Settings
 from mirror.models import Event, Forecast, Trade
 

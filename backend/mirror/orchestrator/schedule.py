@@ -4,6 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import func, select
 
 from mirror.agents.blue import run_blue_scan
+from mirror.agents.patcher import propose_patch_for_finding
 from mirror.agents.red import run_red_once
 from mirror.agents.strategy_schema import parse_strategy_yaml
 from mirror.config import Settings
@@ -13,17 +14,31 @@ from mirror.orchestrator.resolution import build_resolution_graph
 from mirror.tournament.exits import manage_tournament_exits
 
 
-async def run_lineage_once(settings: Settings, lineage: str) -> None:
+async def run_lineage_once(settings: Settings, lineage: str, ticker_override: str | None = None) -> None:
     async with SessionLocal() as session:
         try:
-            await run_red_once(session, settings, lineage)
+            await run_red_once(session, settings, lineage, ticker_override=ticker_override)
         except Exception as exc:
-            session.add(Event(agent_id=None, kind="red_run_failed", severity="error", payload_json={"lineage": lineage, "error": str(exc)}))
+            payload = {"lineage": lineage, "error": str(exc)}
+            if ticker_override:
+                payload["ticker"] = ticker_override
+            session.add(Event(agent_id=None, kind="red_run_failed", severity="error", payload_json=payload))
             await session.commit()
 
 
 async def run_all_reds(settings: Settings) -> None:
-    for lineage in ("red-a", "red-b", "red-c", "red-d"):
+    lineages = ("red-a", "red-b", "red-c", "red-d")
+    if settings.kraken_execution_mode == "spot_paper":
+        for pair in settings.trading_pairs_list():
+            for lineage in lineages:
+                await run_lineage_once(settings, lineage, ticker_override=pair)
+        return
+    if settings.kraken_execution_mode == "account":
+        for symbol in settings.trading_futures_symbols_list():
+            for lineage in lineages:
+                await run_lineage_once(settings, lineage, ticker_override=symbol)
+        return
+    for lineage in lineages:
         await run_lineage_once(settings, lineage)
 
 
@@ -40,7 +55,10 @@ async def run_all_blue_scans(settings: Settings) -> None:
     for lineage in ("red-a", "red-b", "red-c", "red-d"):
         async with SessionLocal() as session:
             try:
-                await run_blue_scan(session, settings, lineage)
+                findings = await run_blue_scan(session, settings, lineage)
+                for finding in findings:
+                    if finding.status == "pending":
+                        await propose_patch_for_finding(session, settings, str(finding.id))
             except Exception as exc:
                 session.add(Event(agent_id=None, kind="blue_scan_failed", severity="error", payload_json={"lineage": lineage, "error": str(exc)}))
                 await session.commit()

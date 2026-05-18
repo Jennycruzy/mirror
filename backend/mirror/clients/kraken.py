@@ -270,7 +270,8 @@ class KrakenClient:
         price = extract_price_for_symbol(ticker_payload, symbol)
         if price is None or price <= 0:
             raise KrakenCliCommandFailed(f"Could not derive futures order size for {symbol}: ticker price unavailable")
-        size = size_usd / price
+        instrument_payload = await self.futures_instruments()
+        size = futures_order_size(symbol, size_usd, price, instrument_payload)
         args = [
             "futures",
             "order",
@@ -287,6 +288,7 @@ class KrakenClient:
         if reduce_only:
             args.insert(-2, "--reduce-only")
         result = await self.run_json(args)
+        validate_order_response(result.json_data)
         return result.json_data
 
     async def futures_paper_balance(self) -> dict[str, Any]:
@@ -294,7 +296,7 @@ class KrakenClient:
 
     async def trading_status(self) -> dict[str, Any]:
         if self.settings.kraken_execution_mode == "account":
-            return await self.verify_execution_mode()
+            return normalize_account_status(await self.verify_execution_mode())
         if self.settings.kraken_execution_mode == "spot_paper":
             status = (await self.run_json(["paper", "status", "-o", "json"])).json_data
             balance = (await self.run_json(["paper", "balance", "-o", "json"])).json_data
@@ -306,6 +308,9 @@ class KrakenClient:
 
     async def futures_tickers(self) -> dict[str, Any]:
         return (await self.run_json(["futures", "tickers", "-o", "json"])).json_data
+
+    async def futures_instruments(self) -> dict[str, Any]:
+        return (await self.run_json(["futures", "instruments", "-o", "json"])).json_data
 
     async def spot_ticker(self, pair: str) -> dict[str, Any]:
         return (await self.run_json(["ticker", pair, "-o", "json"])).json_data
@@ -415,9 +420,9 @@ def is_explicit_xstock_symbol(symbol: str) -> bool:
 
 def extract_price_for_symbol(payload: Any, symbol: str) -> float | None:
     if isinstance(payload, dict):
-        symbol_matches = any(isinstance(v, str) and v == symbol for v in payload.values())
+        symbol_matches = any(isinstance(v, str) and v.upper() == symbol.upper() for v in payload.values())
         if symbol_matches:
-            for key in ("price", "last", "markPrice", "mark_price", "lastPrice", "last_price"):
+            for key in ("markPrice", "last", "indexPrice", "price", "mark_price", "lastPrice", "last_price"):
                 value = payload.get(key)
                 parsed = parse_float(value)
                 if parsed is not None:
@@ -432,6 +437,111 @@ def extract_price_for_symbol(payload: Any, symbol: str) -> float | None:
             if found is not None:
                 return found
     return None
+
+
+def normalize_account_status(payload: dict[str, Any]) -> dict[str, Any]:
+    accounts = payload.get("accounts") if isinstance(payload, dict) else {}
+    positions = payload.get("positions") if isinstance(payload, dict) else {}
+    flex = first_dict(accounts, ("flex", "futures", "account"))
+    cash = first_dict(accounts, ("cash", "cashAccount"))
+    source = flex or cash or {}
+    equity = first_float(source, ("portfolioValue", "marginEquity", "equity", "currentValue", "balance"))
+    pnl = first_float(source, ("totalUnrealized", "unrealizedPnl", "pnl", "profitLoss"))
+    available_margin = first_float(source, ("availableMargin", "available", "availableBalance"))
+    collateral = first_float(source, ("collateralValue", "collateral", "marginBalance"))
+    normalized_positions = extract_account_positions(positions)
+    return {
+        **payload,
+        "status": {
+            **(payload.get("status") if isinstance(payload.get("status"), dict) else {}),
+            "mode": "account",
+            "equity": equity,
+            "current_value": equity,
+            "pnl": pnl,
+            "unrealized_pnl": pnl,
+            "available_margin": available_margin,
+            "collateral": collateral,
+            "open_positions": len(normalized_positions),
+        },
+        "positions": {"positions": normalized_positions, "raw": positions},
+    }
+
+
+def first_dict(payload: Any, keys: tuple[str, ...]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return value
+    for value in payload.values():
+        found = first_dict(value, keys)
+        if found:
+            return found
+    return {}
+
+
+def extract_account_positions(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        for key in ("openPositions", "positions"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [position for position in value if isinstance(position, dict)]
+        for value in payload.values():
+            found = extract_account_positions(value)
+            if found:
+                return found
+    if isinstance(payload, list):
+        return [position for position in payload if isinstance(position, dict)]
+    return []
+
+
+def futures_order_size(symbol: str, size_usd: float, price: float, instruments_payload: Any) -> float:
+    instrument = extract_instrument_for_symbol(instruments_payload, symbol) or {}
+    instrument_type = str(instrument.get("type") or "").lower()
+    precision = parse_float(instrument.get("contractValueTradePrecision"))
+    contract_size = parse_float(instrument.get("contractSize")) or 1.0
+    if instrument_type == "futures_inverse":
+        contracts = size_usd / contract_size
+    else:
+        contracts = size_usd / price
+    if precision is not None and precision <= 0:
+        return max(float(int(contracts)), 1.0)
+    if precision is not None and precision > 0:
+        scale = 10 ** int(precision)
+        return max(int(contracts * scale) / scale, 1 / scale)
+    return contracts
+
+
+def extract_instrument_for_symbol(payload: Any, symbol: str) -> dict[str, Any] | None:
+    if isinstance(payload, dict):
+        if isinstance(payload.get("symbol"), str) and payload["symbol"].upper() == symbol.upper():
+            return payload
+        for value in payload.values():
+            found = extract_instrument_for_symbol(value, symbol)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = extract_instrument_for_symbol(item, symbol)
+            if found is not None:
+                return found
+    return None
+
+
+def validate_order_response(payload: Any) -> None:
+    if not isinstance(payload, dict):
+        raise KrakenCliCommandFailed("Kraken order response was not a JSON object")
+    result = str(payload.get("result") or "").lower()
+    status = str(payload.get("status") or payload.get("sendStatus") or "").lower()
+    error = payload.get("error") or payload.get("errorMessage")
+    if error:
+        raise KrakenCliCommandFailed(f"Kraken order rejected: {error}")
+    rejected_statuses = {"invalidsize", "invalid_price", "rejected", "insufficientavailablefunds", "insufficientfunds"}
+    if result and result != "success":
+        raise KrakenCliCommandFailed(f"Kraken order did not succeed: {payload}")
+    if status in rejected_statuses or status.startswith("invalid"):
+        raise KrakenCliCommandFailed(f"Kraken order rejected with status={status}")
 
 
 def extract_spot_price(payload: Any, pair: str) -> float | None:
@@ -493,6 +603,8 @@ def spot_ticker_record(payload: dict[str, Any], pair: str) -> dict[str, Any]:
         "pair": pair,
         "last": last,
         "price": last,
+        "bid": parse_float(record.get("b")[0]) if isinstance(record.get("b"), list) and record.get("b") else None,
+        "ask": parse_float(record.get("a")[0]) if isinstance(record.get("a"), list) and record.get("a") else None,
         "change24h": change24h,
         "volumeQuote": volume_quote,
         "raw": record,

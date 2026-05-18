@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     tournament_min_hold_seconds: int = Field(default=45, ge=0, le=86400)
     tournament_winner_extension_minutes: int = Field(default=180, ge=0, le=1440)
     tournament_equity_snapshot_min_seconds: int = Field(default=300, ge=10, le=86400)
+    tournament_adaptive_enabled: bool = True
+    tournament_adaptive_lookback_trades: int = Field(default=6, ge=1, le=100)
+    tournament_adaptive_min_samples: int = Field(default=2, ge=1, le=50)
+    tournament_adaptive_disable_loss_usd: float = 0.0
     tournament_min_pnl_improvement_pct: float = Field(default=10.0, ge=0)
     tournament_max_drawdown_worsening_pct: float = Field(default=20.0, ge=0)
     tournament_max_brier_degradation_pct: float = Field(default=10.0, ge=0)

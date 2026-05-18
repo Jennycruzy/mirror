@@ -1,9 +1,18 @@
 from mirror.agents.strategy_schema import RedForecast, initial_strategy_yaml, parse_strategy_yaml
 from mirror.backtest.replay import ReplayResult
 from mirror.tournament.gate import evaluate_tournament_gate
+from mirror.tournament.adaptive import compute_direction_stats, losing_direction_reason, rank_symbols_by_recent_pnl
 from mirror.tournament.ranking import SymbolOpportunity, rank_opportunities
 from mirror.tournament.risk import RiskDecision, validate_tournament_trade
 from mirror.orchestrator.graph import compute_spread_bps
+
+
+class ClosedTrade:
+    def __init__(self, ticker, side, realized_pnl_usd, closed_at=None):
+        self.ticker = ticker
+        self.side = side
+        self.realized_pnl_usd = realized_pnl_usd
+        self.closed_at = closed_at
 
 
 def test_tournament_gate_passes_pnl_improvement_with_guardrails():
@@ -100,3 +109,39 @@ def test_risk_decision_can_explain_same_side_exposure():
 def test_compute_spread_ignores_distorted_demo_quote():
     assert compute_spread_bps({"markPrice": 2144.0, "bid": 200, "ask": 2120.55}) is None
     assert compute_spread_bps({"markPrice": 2144.0, "bid": 2143.5, "ask": 2144.5}) < 5
+
+
+def test_adaptive_direction_disables_recent_loser():
+    stats = compute_direction_stats(
+        [
+            ClosedTrade("PI_XBTUSD", "sell", -0.4),
+            ClosedTrade("PI_XBTUSD", "sell", -0.2),
+            ClosedTrade("PI_ETHUSD", "sell", 1.0),
+        ],
+        lookback_per_direction=6,
+    )
+    reason = losing_direction_reason(
+        stats,
+        ticker="PI_XBTUSD",
+        side="sell",
+        min_samples=2,
+        disable_loss_usd=0,
+    )
+    assert reason is not None
+    assert "adaptive disabled PI_XBTUSD sell" in reason
+
+
+def test_adaptive_symbol_order_routes_best_recent_performer_first():
+    stats = compute_direction_stats(
+        [
+            ClosedTrade("PI_XBTUSD", "sell", -0.4),
+            ClosedTrade("PI_XBTUSD", "buy", -0.1),
+            ClosedTrade("PI_ETHUSD", "sell", 0.8),
+            ClosedTrade("PI_ETHUSD", "sell", 0.4),
+            ClosedTrade("PI_XRPUSD", "sell", 2.0),
+            ClosedTrade("PI_XRPUSD", "buy", -0.2),
+        ],
+        lookback_per_direction=6,
+    )
+    ranked = rank_symbols_by_recent_pnl(["PI_XBTUSD", "PI_ETHUSD", "PI_XRPUSD"], stats, min_samples=1)
+    assert ranked == ["PI_XRPUSD", "PI_ETHUSD", "PI_XBTUSD"]

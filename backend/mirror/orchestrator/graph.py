@@ -13,6 +13,7 @@ from mirror.clients.kraken import KrakenClient, extract_price_for_symbol, select
 from mirror.config import Settings
 from mirror.errors import InferenceMalformedJSON
 from mirror.models import Agent, Event, Forecast, MarketTick, Trade
+from mirror.tournament.adaptive import compute_direction_stats, losing_direction_reason, side_for_direction
 from mirror.tournament.risk import RiskDecision, validate_tournament_trade
 
 
@@ -237,7 +238,7 @@ async def evaluate_tournament_risk(state: RedState, strategy, forecast_obj: RedF
     spread_bps = compute_spread_bps(market)
     volume_quote = parse_market_float(market.get("volumeQuote")) or 0.0
     confidence_floor = max(settings.tournament_min_confidence, strategy.mutable.entry_confidence_threshold)
-    direction = "buy" if forecast_obj.predicted_direction == "long" else "sell"
+    direction = side_for_direction(forecast_obj.predicted_direction)
 
     if forecast_obj.confidence < confidence_floor and forecast_obj.position_size_usd > strategy.locked.scout_size_usd:
         return RiskDecision(False, "confidence below tournament minimum")
@@ -259,6 +260,29 @@ async def evaluate_tournament_risk(state: RedState, strategy, forecast_obj: RedF
         return RiskDecision(False, "liquidity below tournament minimum")
 
     async with state["session_factory"]() as session:
+        if settings.tournament_adaptive_enabled:
+            recent_closed_trades = (
+                await session.execute(
+                    select(Trade)
+                    .where(
+                        Trade.status == "closed",
+                        Trade.mode == settings.kraken_execution_mode,
+                        Trade.realized_pnl_usd.is_not(None),
+                    )
+                    .order_by(Trade.closed_at.desc())
+                    .limit(settings.tournament_adaptive_lookback_trades * max(len(settings.trading_futures_symbols_list()), 1) * 2)
+                )
+            ).scalars().all()
+            stats = compute_direction_stats(list(recent_closed_trades), settings.tournament_adaptive_lookback_trades)
+            adaptive_reason = losing_direction_reason(
+                stats,
+                ticker=state["ticker"],
+                side=direction,
+                min_samples=settings.tournament_adaptive_min_samples,
+                disable_loss_usd=settings.tournament_adaptive_disable_loss_usd,
+            )
+            if adaptive_reason:
+                return RiskDecision(False, adaptive_reason)
         open_positions_count = int(
             await session.scalar(
                 select(func.count()).select_from(Trade).where(

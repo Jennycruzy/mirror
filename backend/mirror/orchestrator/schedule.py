@@ -11,6 +11,7 @@ from mirror.config import Settings
 from mirror.db import SessionLocal
 from mirror.models import Agent, Event, Trade
 from mirror.orchestrator.resolution import build_resolution_graph
+from mirror.tournament.adaptive import compute_direction_stats, rank_symbols_by_recent_pnl
 from mirror.tournament.exits import manage_tournament_exits
 
 
@@ -34,12 +35,34 @@ async def run_all_reds(settings: Settings) -> None:
                 await run_lineage_once(settings, lineage, ticker_override=pair)
         return
     if settings.kraken_execution_mode == "account":
-        for symbol in settings.trading_futures_symbols_list():
+        for symbol in await adaptive_symbol_order(settings):
             for lineage in lineages:
                 await run_lineage_once(settings, lineage, ticker_override=symbol)
         return
     for lineage in lineages:
         await run_lineage_once(settings, lineage)
+
+
+async def adaptive_symbol_order(settings: Settings) -> list[str]:
+    symbols = settings.trading_futures_symbols_list()
+    if not settings.tournament_adaptive_enabled or not symbols:
+        return symbols
+    async with SessionLocal() as session:
+        recent_closed_trades = (
+            await session.execute(
+                select(Trade)
+                .where(
+                    Trade.status == "closed",
+                    Trade.mode == settings.kraken_execution_mode,
+                    Trade.realized_pnl_usd.is_not(None),
+                    Trade.ticker.in_(symbols),
+                )
+                .order_by(Trade.closed_at.desc())
+                .limit(settings.tournament_adaptive_lookback_trades * len(symbols) * 2)
+            )
+        ).scalars().all()
+    stats = compute_direction_stats(list(recent_closed_trades), settings.tournament_adaptive_lookback_trades)
+    return rank_symbols_by_recent_pnl(symbols, stats, min_samples=settings.tournament_adaptive_min_samples)
 
 
 async def run_resolution_sweep(settings: Settings) -> None:

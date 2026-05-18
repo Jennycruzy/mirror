@@ -3,7 +3,7 @@ import type { PatchRecord } from "../lib/types";
 export function PatchQueuePanel({ patches }: { patches: PatchRecord[] }) {
   const recent = patches.slice(0, 5);
   return (
-    <section className="border border-slate-800 bg-slate-950">
+    <section className="border border-violet-500/20 bg-slate-950/95">
       <div className="flex items-center justify-between border-b border-slate-800 p-4">
         <h2 className="font-mono text-lg font-semibold text-slate-100">Strategy Patches</h2>
         <span className="bg-violet-500/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-violet-200">holdout gate</span>
@@ -16,7 +16,7 @@ export function PatchQueuePanel({ patches }: { patches: PatchRecord[] }) {
       ) : null}
       <div className="divide-y divide-slate-900">
         {recent.map((patch) => (
-          <article key={patch.id} className="p-4 text-sm">
+          <article key={patch.id} className="p-4 text-sm hover:bg-slate-900/60">
             <div className="flex items-center justify-between gap-3">
               <span className="font-mono text-slate-200">{patch.patch_type.toUpperCase()}</span>
               <span className={statusClass(patch.status)}>{patch.status}</span>

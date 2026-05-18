@@ -489,14 +489,35 @@ def extract_account_positions(payload: Any) -> list[dict[str, Any]]:
         for key in ("openPositions", "positions"):
             value = payload.get(key)
             if isinstance(value, list):
-                return [position for position in value if isinstance(position, dict)]
+                return [normalize_account_position(position) for position in value if isinstance(position, dict)]
         for value in payload.values():
             found = extract_account_positions(value)
             if found:
                 return found
     if isinstance(payload, list):
-        return [position for position in payload if isinstance(position, dict)]
+        return [normalize_account_position(position) for position in payload if isinstance(position, dict)]
     return []
+
+
+def normalize_account_position(position: dict[str, Any]) -> dict[str, Any]:
+    entry_price = first_float(position, ("entry_price", "entryPrice", "price"))
+    mark_price = first_float(position, ("mark_price", "markPrice", "mark", "price"))
+    unrealized = first_float(position, ("unrealized_pnl", "unrealizedPnl", "unrealized", "pnl", "unrealizedFunding"))
+    liquidation_price = first_float(position, ("liquidation_price", "liquidationPrice", "liquidation"))
+    leverage = first_float(position, ("leverage",)) or 1.0
+    size = first_float(position, ("size", "contracts", "qty", "quantity")) or 0.0
+    side = str(position.get("side") or "").lower()
+    return {
+        **position,
+        "symbol": position.get("symbol") or position.get("instrument") or position.get("ticker"),
+        "side": side,
+        "size": size,
+        "entry_price": entry_price,
+        "mark_price": mark_price,
+        "leverage": leverage,
+        "unrealized_pnl": unrealized,
+        "liquidation_price": liquidation_price,
+    }
 
 
 def futures_order_size(symbol: str, size_usd: float, price: float, instruments_payload: Any) -> float:

@@ -90,6 +90,7 @@ async def execute_registration_job(session: AsyncSession, settings: Settings, jo
         agent.ipfs_cid = final_cid
         job.status = "confirmed"
         job.tx_hash = result["tx_hash"]
+        job.last_error = None
         job.payload_json = final_payload
         session.add(
             Event(

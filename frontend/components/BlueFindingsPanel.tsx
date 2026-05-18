@@ -2,7 +2,7 @@ import type { BlueFinding } from "../lib/types";
 
 export function BlueFindingsPanel({ findings }: { findings: BlueFinding[] }) {
   return (
-    <section className="border border-slate-800 bg-slate-950">
+    <section className="border border-blue-500/20 bg-slate-950/95">
       <div className="flex items-center justify-between border-b border-slate-800 p-4">
         <h2 className="font-mono text-lg font-semibold text-slate-100">Blue Team</h2>
         <span className="bg-blue-500/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-blue-200">calibration attack</span>
@@ -15,12 +15,13 @@ export function BlueFindingsPanel({ findings }: { findings: BlueFinding[] }) {
       ) : null}
       <div className="space-y-3 p-4">
         {findings.map((finding) => (
-          <article key={finding.id} className="border border-slate-800 bg-slate-900/60 p-4">
+          <article key={finding.id} className="border border-blue-500/10 bg-slate-900/70 p-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-400">n={finding.sample_size}</span>
               <span className="bg-blue-500/10 px-2 py-1 text-xs text-blue-200">{finding.status}</span>
             </div>
             <p className="mt-2 text-slate-200">{finding.suggested_failure_mode}</p>
+            <p className="mt-2 text-xs text-blue-200/80">{finding.suggested_fix_direction}</p>
             <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-3">
               <span>Brier gap {finding.brier_gap.toFixed(3)}</span>
               <span>Pred {finding.predicted_confidence_avg.toFixed(2)}</span>

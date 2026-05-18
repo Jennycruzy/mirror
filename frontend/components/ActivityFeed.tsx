@@ -3,15 +3,18 @@ import type { MirrorEvent } from "../lib/types";
 export function ActivityFeed({ events }: { events: MirrorEvent[] }) {
   const visibleEvents = events.filter((event) => event.kind !== "heartbeat");
   return (
-    <section className="border border-slate-800 bg-slate-950">
+    <section className="border border-slate-800 bg-slate-950/95">
       <div className="flex items-center justify-between border-b border-slate-800 p-4">
         <h2 className="font-mono text-lg font-semibold text-slate-100">Event Tape</h2>
-        <span className="bg-slate-900 px-3 py-1 text-xs uppercase tracking-[0.16em] text-slate-500">stream</span>
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300" />
+          <span className="bg-slate-900 px-3 py-1 text-xs uppercase tracking-[0.16em] text-slate-500">stream</span>
+        </div>
       </div>
       <div className="max-h-96 overflow-auto text-sm">
         {visibleEvents.length === 0 ? <p className="p-4 text-slate-500">Awaiting execution, forecast, and calibration events.</p> : null}
         {visibleEvents.map((event, index) => (
-          <article key={`${event.id ?? event.kind}-${index}`} className="border-b border-slate-900 p-3">
+          <article key={`${event.id ?? event.kind}-${index}`} className="border-b border-slate-900 p-3 hover:bg-slate-900/60">
             <div className="flex items-center justify-between gap-3">
               <span className="font-mono text-slate-200">{labelFor(event.kind)}</span>
               <span className={severityClass(event.severity)}>{event.severity ?? "info"}</span>

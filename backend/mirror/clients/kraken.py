@@ -78,6 +78,8 @@ class KrakenClient:
             env["KRAKEN_API_SECRET"] = self.settings.kraken_api_secret
         if self.settings.kraken_futures_url:
             env["KRAKEN_FUTURES_URL"] = self.settings.kraken_futures_url
+        if self.settings.kraken_danger_allow_any_url_host:
+            env["KRAKEN_DANGER_ALLOW_ANY_URL_HOST"] = "1"
         return env
 
     async def help_text(self, args: list[str] | None = None) -> str:

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     kraken_api_key: str | None = None
     kraken_api_secret: str | None = None
     kraken_futures_url: str | None = None
+    kraken_danger_allow_any_url_host: bool = False
     kraken_execution_mode: str = "paper"
     kraken_require_paper_mode: bool = True
     featherless_api_key: str | None = None

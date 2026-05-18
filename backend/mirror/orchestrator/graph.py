@@ -242,9 +242,9 @@ async def execute_trade(state: RedState) -> RedState:
 
         trade_id: str | None = None
         if settings.trading_enabled and state["should_trade"]:
-            idempotency_key = f"{state['agent_id']}:{forecast_row.id}:paper"
+            idempotency_key = f"{state['agent_id']}:{forecast_row.id}:{settings.kraken_execution_mode}"
             side = "buy" if forecast_row.predicted_direction == "long" else "sell"
-            response = await KrakenClient(settings).place_paper_order(
+            response = await KrakenClient(settings).place_order(
                 symbol=state["ticker"],
                 side=side,
                 size_usd=forecast_row.position_size_usd,
@@ -254,7 +254,7 @@ async def execute_trade(state: RedState) -> RedState:
             trade = Trade(
                 agent_id=state["agent_id"],
                 forecast_id=forecast_row.id,
-                mode="paper",
+                mode=settings.kraken_execution_mode,
                 ticker=state["ticker"],
                 side=side,
                 size_usd=forecast_row.position_size_usd,

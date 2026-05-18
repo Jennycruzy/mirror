@@ -9,6 +9,10 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://mirror:mirror@localhost:5432/mirror"
     kraken_cli_path: str = "kraken"
+    kraken_api_key: str | None = None
+    kraken_api_secret: str | None = None
+    kraken_futures_url: str | None = None
+    kraken_execution_mode: str = "paper"
     kraken_require_paper_mode: bool = True
     featherless_api_key: str | None = None
     featherless_base_url: str = "https://api.featherless.ai/v1"

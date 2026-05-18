@@ -16,7 +16,7 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
     trades = (
         await session.execute(
             select(Trade)
-            .where(Trade.status == "open", Trade.mode == "paper")
+            .where(Trade.status == "open", Trade.mode == settings.kraken_execution_mode)
             .order_by(Trade.opened_at.asc())
             .limit(100)
         )
@@ -42,7 +42,7 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
 
         close_side = "sell" if trade.side == "buy" else "buy"
         idempotency_key = f"{trade.id}:exit:{reason}"
-        response = await kraken.place_paper_order(
+        response = await kraken.place_order(
             symbol=trade.ticker,
             side=close_side,
             size_usd=trade.size_usd,
@@ -94,4 +94,3 @@ def leveraged_pnl_pct(side: str, entry_price: float, exit_price: float, leverage
 
 def estimated_pnl_usd(side: str, entry_price: float, exit_price: float, size_usd: float, leverage: int) -> float:
     return (leveraged_pnl_pct(side, entry_price, exit_price, leverage) / 100.0) * size_usd
-

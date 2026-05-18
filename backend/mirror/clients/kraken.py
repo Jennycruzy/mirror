@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -42,10 +43,13 @@ class KrakenClient:
     async def run_json(self, args: list[str], timeout: float | None = None) -> KrakenCommandResult:
         self.ensure_installed()
         full_args = [self.settings.kraken_cli_path, *args]
+        display_args = redact_args(full_args)
+        env = self._subprocess_env()
         proc = await asyncio.create_subprocess_exec(
             *full_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
@@ -54,17 +58,27 @@ class KrakenClient:
             )
         except asyncio.TimeoutError as exc:
             proc.kill()
-            raise KrakenCliCommandFailed(f"Kraken CLI timed out: {' '.join(full_args)}") from exc
+            raise KrakenCliCommandFailed(f"Kraken CLI timed out: {' '.join(display_args)}") from exc
 
         stdout = stdout_b.decode("utf-8", errors="replace")
         stderr = stderr_b.decode("utf-8", errors="replace")
         if proc.returncode != 0:
-            raise KrakenCliCommandFailed(f"Kraken CLI failed ({proc.returncode}): {stderr.strip()}")
+            raise KrakenCliCommandFailed(f"Kraken CLI failed ({proc.returncode}) for {' '.join(display_args)}: {stderr.strip()}")
         try:
             data = json.loads(stdout)
         except json.JSONDecodeError as exc:
-            raise KrakenCliCommandFailed(f"Kraken CLI did not return strict JSON for: {' '.join(full_args)}") from exc
+            raise KrakenCliCommandFailed(f"Kraken CLI did not return strict JSON for: {' '.join(display_args)}") from exc
         return KrakenCommandResult(args=full_args, stdout=stdout, stderr=stderr, json_data=data)
+
+    def _subprocess_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        if self.settings.kraken_api_key:
+            env["KRAKEN_API_KEY"] = self.settings.kraken_api_key
+        if self.settings.kraken_api_secret:
+            env["KRAKEN_API_SECRET"] = self.settings.kraken_api_secret
+        if self.settings.kraken_futures_url:
+            env["KRAKEN_FUTURES_URL"] = self.settings.kraken_futures_url
+        return env
 
     async def help_text(self, args: list[str] | None = None) -> str:
         self.ensure_installed()
@@ -93,6 +107,19 @@ class KrakenClient:
         if self.settings.kraken_require_paper_mode and "paper" not in text:
             raise KrakenNotPaperMode("Kraken futures paper status/balance did not confirm paper mode")
         return payload
+
+    async def verify_execution_mode(self) -> dict[str, Any]:
+        if self.settings.kraken_execution_mode == "paper":
+            return await self.verify_paper_mode()
+        if self.settings.kraken_execution_mode != "account":
+            raise KrakenCliCommandFailed(f"Unsupported KRAKEN_EXECUTION_MODE={self.settings.kraken_execution_mode}")
+        if self.settings.kraken_require_paper_mode:
+            raise KrakenNotPaperMode("KRAKEN_EXECUTION_MODE=account requires KRAKEN_REQUIRE_PAPER_MODE=false")
+        if not self.settings.kraken_api_key or not self.settings.kraken_api_secret:
+            raise KrakenCliCommandFailed("KRAKEN_API_KEY and KRAKEN_API_SECRET are required for account-backed Kraken CLI trading")
+        accounts = (await self.run_json(["futures", "accounts", "-o", "json"])).json_data
+        positions = (await self.run_json(["futures", "positions", "-o", "json"])).json_data
+        return {"status": {"mode": "account"}, "accounts": accounts, "positions": positions}
 
     async def discover_xstock_perp_symbols(self) -> list[str]:
         result = await self.run_json(["futures", "tickers", "-o", "json"])
@@ -151,8 +178,65 @@ class KrakenClient:
             raise KrakenNotPaperMode("Kraken order response did not confirm futures paper mode")
         return result.json_data
 
+    async def place_order(
+        self,
+        symbol: str,
+        side: str,
+        size_usd: float,
+        leverage: int,
+        idempotency_key: str,
+        reduce_only: bool = False,
+    ) -> dict[str, Any]:
+        if self.settings.kraken_execution_mode == "paper":
+            return await self.place_paper_order(symbol, side, size_usd, leverage, idempotency_key, reduce_only)
+        return await self.place_account_order(symbol, side, size_usd, idempotency_key, reduce_only)
+
+    async def place_account_order(
+        self,
+        symbol: str,
+        side: str,
+        size_usd: float,
+        idempotency_key: str,
+        reduce_only: bool = False,
+    ) -> dict[str, Any]:
+        if side not in {"buy", "sell"}:
+            raise KrakenCliCommandFailed(f"Invalid futures side: {side}")
+        if size_usd <= 0:
+            raise KrakenCliCommandFailed(f"Invalid futures size: {size_usd}")
+
+        await self.verify_execution_mode()
+        ticker_payload = (await self.run_json(["futures", "tickers", "-o", "json"])).json_data
+        price = extract_price_for_symbol(ticker_payload, symbol)
+        if price is None or price <= 0:
+            raise KrakenCliCommandFailed(f"Could not derive futures order size for {symbol}: ticker price unavailable")
+        size = size_usd / price
+        args = [
+            "futures",
+            "order",
+            side,
+            symbol,
+            format_cli_number(size),
+            "--type",
+            "market",
+            "--client-order-id",
+            idempotency_key,
+            "-o",
+            "json",
+        ]
+        if reduce_only:
+            args.insert(-2, "--reduce-only")
+        result = await self.run_json(args)
+        return result.json_data
+
     async def futures_paper_balance(self) -> dict[str, Any]:
         return (await self.run_json(["futures", "paper", "balance", "-o", "json"])).json_data
+
+    async def trading_status(self) -> dict[str, Any]:
+        if self.settings.kraken_execution_mode == "account":
+            return await self.verify_execution_mode()
+        status = (await self.run_json(["futures", "paper", "status", "-o", "json"])).json_data
+        positions = (await self.run_json(["futures", "paper", "positions", "-o", "json"])).json_data
+        return {"status": status, "positions": positions}
 
     async def futures_tickers(self) -> dict[str, Any]:
         return (await self.run_json(["futures", "tickers", "-o", "json"])).json_data
@@ -297,3 +381,17 @@ def first_float(payload: dict[str, Any], keys: tuple[str, ...]) -> float | None:
 
 def format_cli_number(value: float) -> str:
     return f"{value:.8f}".rstrip("0").rstrip(".")
+
+
+def redact_args(args: list[str]) -> list[str]:
+    redacted: list[str] = []
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            redacted.append("[REDACTED]")
+            skip_next = False
+            continue
+        redacted.append(arg)
+        if arg in {"--api-key", "--api-secret", "--api-secret-file"}:
+            skip_next = True
+    return redacted

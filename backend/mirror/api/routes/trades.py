@@ -13,9 +13,7 @@ router = APIRouter(prefix="/trades", tags=["trades"])
 @router.get("/paper-status")
 async def paper_status():
     kraken = KrakenClient(get_settings())
-    status = (await kraken.run_json(["futures", "paper", "status", "-o", "json"])).json_data
-    positions = (await kraken.run_json(["futures", "paper", "positions", "-o", "json"])).json_data
-    return {"status": status, "positions": positions}
+    return await kraken.trading_status()
 
 
 @router.get("")

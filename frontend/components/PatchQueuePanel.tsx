@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { PatchRecord } from "../lib/types";
 
 export function PatchQueuePanel({ patches }: { patches: PatchRecord[] }) {
@@ -19,7 +20,12 @@ export function PatchQueuePanel({ patches }: { patches: PatchRecord[] }) {
           <article key={patch.id} className="p-4 text-sm hover:bg-violet-950/20">
             <div className="flex items-center justify-between gap-3">
               <span className="font-mono text-slate-200">{String(patch.patch_type ?? "patch").toUpperCase()}</span>
-              <span className={statusClass(patch.status)}>{patch.status}</span>
+              <div className="flex items-center gap-2">
+                <span className={statusClass(patch.status)}>{patch.status}</span>
+                <Link className="border border-violet-400/20 bg-violet-500/10 px-2 py-1 text-xs text-violet-200 hover:bg-violet-500/20" href={`/patches/${patch.id}`}>
+                  Open
+                </Link>
+              </div>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
               <span>Pre Brier {number(patch.holdout_pre_brier)}</span>

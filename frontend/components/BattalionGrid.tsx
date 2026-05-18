@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Agent } from "../lib/types";
 
 const styles: Record<string, { border: string; text: string; chip: string }> = {
@@ -36,7 +37,12 @@ function AgentCard({ agent }: { agent: Agent }) {
             <h2 className="mt-2 font-mono text-xl font-semibold tracking-tight text-slate-50 drop-shadow-[0_0_12px_rgba(248,250,252,0.18)]">MIRROR v{agent.version}</h2>
             <p className="mt-1 text-xs text-slate-500">{agent.name}</p>
           </div>
-          <span className={`border px-2 py-1 text-xs uppercase tracking-[0.16em] ${theme.chip} ${theme.border}`}>{agent.status}</span>
+          <div className="flex items-center gap-2">
+            <span className={`border px-2 py-1 text-xs uppercase tracking-[0.16em] ${theme.chip} ${theme.border}`}>{agent.status}</span>
+            <Link className="border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-xs uppercase tracking-[0.16em] text-cyan-200 hover:bg-cyan-400/20" href={`/agents/${agent.id}`}>
+              Open
+            </Link>
+          </div>
         </div>
 
         <div className="grid gap-px bg-slate-800 sm:grid-cols-3">

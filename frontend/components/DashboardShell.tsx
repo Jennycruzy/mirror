@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityFeed } from "./ActivityFeed";
 import { BattalionGrid } from "./BattalionGrid";
@@ -107,10 +108,25 @@ export function DashboardShell({ initialData, initialError }: { initialData: Das
               <span className="border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-amber-200">PnL objective</span>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.16em]">
-            <span className={error ? "text-rose-300" : "text-teal-300"}>{error ? "degraded" : "connected"}</span>
-            <span className="text-slate-700">/</span>
-            <span className="text-slate-400">{lastUpdated ? `sync ${lastUpdated}` : "awaiting stream"}</span>
+          <div className="flex flex-col items-start gap-3 lg:items-end">
+            <nav className="flex flex-wrap gap-2">
+              <Link className="border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-cyan-100 hover:bg-cyan-400/20" href="/">
+                Terminal
+              </Link>
+              <Link className="border border-violet-400/20 bg-violet-400/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-violet-100 hover:bg-violet-400/20" href="/lineage">
+                Lineage
+              </Link>
+              {data.agents[0] ? (
+                <Link className="border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-amber-100 hover:bg-amber-400/20" href={`/agents/${data.agents[0].id}`}>
+                  Lead Agent
+                </Link>
+              ) : null}
+            </nav>
+            <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.16em]">
+              <span className={error ? "text-rose-300" : "text-teal-300"}>{error ? "degraded" : "connected"}</span>
+              <span className="text-slate-700">/</span>
+              <span className="text-slate-400">{lastUpdated ? `sync ${lastUpdated}` : "awaiting stream"}</span>
+            </div>
           </div>
         </div>
         <div className="grid gap-px bg-cyan-400/10 md:grid-cols-4 xl:grid-cols-7">

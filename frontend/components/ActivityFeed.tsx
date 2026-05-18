@@ -1,7 +1,15 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import type { MirrorEvent } from "../lib/types";
 
 export function ActivityFeed({ events }: { events: MirrorEvent[] }) {
-  const visibleEvents = events.filter((event) => event.kind !== "heartbeat");
+  const [severityFilter, setSeverityFilter] = useState<"all" | "info" | "warning" | "error">("all");
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const visibleEvents = useMemo(
+    () => events.filter((event) => event.kind !== "heartbeat").filter((event) => severityFilter === "all" || (event.severity ?? "info") === severityFilter),
+    [events, severityFilter]
+  );
   return (
     <section className="mirror-panel">
       <div className="flex items-center justify-between border-b border-cyan-400/10 p-4">
@@ -11,18 +19,34 @@ export function ActivityFeed({ events }: { events: MirrorEvent[] }) {
           <span className="border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-cyan-200">stream</span>
         </div>
       </div>
+      <div className="flex flex-wrap gap-2 border-b border-cyan-400/10 p-3">
+        {(["all", "info", "warning", "error"] as const).map((value) => (
+          <button key={value} className={filterButtonClass(severityFilter === value)} type="button" onClick={() => setSeverityFilter(value)}>
+            {value}
+          </button>
+        ))}
+      </div>
       <div className="max-h-96 overflow-auto text-sm">
         {visibleEvents.length === 0 ? <p className="p-4 text-slate-500">Awaiting execution, forecast, and calibration events.</p> : null}
-        {visibleEvents.map((event, index) => (
-          <article key={`${event.id ?? event.kind}-${index}`} className="border-b border-slate-900 p-3 hover:bg-cyan-950/20">
+        {visibleEvents.map((event, index) => {
+          const key = `${event.id ?? event.kind}-${index}`;
+          const expanded = expandedKey === key;
+          return (
+          <article key={key} className={`cursor-pointer border-b border-slate-900 p-3 hover:bg-cyan-950/20 ${expanded ? "bg-cyan-950/20" : ""}`} onClick={() => setExpandedKey(expanded ? null : key)}>
             <div className="flex items-center justify-between gap-3">
               <span className="font-mono text-slate-200">{labelFor(event.kind)}</span>
               <span className={severityClass(event.severity)}>{event.severity ?? "info"}</span>
             </div>
             {event.payload ? <p className="mt-2 line-clamp-2 text-xs text-slate-500">{summaryFor(event)}</p> : null}
             {event.created_at ? <p className="mt-1 text-xs text-slate-500">{new Date(event.created_at).toLocaleString()}</p> : null}
+            {expanded ? (
+              <pre className="mt-3 max-h-48 overflow-auto border border-slate-800 bg-slate-950 p-3 text-xs text-cyan-100/80">
+                {JSON.stringify(event.payload ?? event, null, 2)}
+              </pre>
+            ) : null}
           </article>
-        ))}
+        );
+        })}
       </div>
     </section>
   );
@@ -36,6 +60,12 @@ function severityClass(severity?: string) {
 
 function labelFor(kind: string) {
   return String(kind ?? "event").replaceAll("_", " ").toUpperCase();
+}
+
+function filterButtonClass(active: boolean) {
+  return active
+    ? "border border-cyan-300/40 bg-cyan-400/15 px-3 py-1 text-xs uppercase tracking-[0.16em] text-cyan-100"
+    : "border border-slate-800 bg-slate-950 px-3 py-1 text-xs uppercase tracking-[0.16em] text-slate-500 hover:border-cyan-400/20 hover:text-slate-200";
 }
 
 function summaryFor(event: MirrorEvent) {

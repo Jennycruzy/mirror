@@ -1,12 +1,26 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import type { PaperStatus, Trade } from "../lib/types";
 
 export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatus | null; trades: Trade[] }) {
+  const [sideFilter, setSideFilter] = useState<"all" | "buy" | "sell">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
+  const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const positions = paperStatus?.positions?.positions ?? [];
-  const recentTrades = trades.filter((trade) => trade.mode === "account").slice(0, 10);
+  const accountTrades = trades.filter((trade) => trade.mode === "account");
+  const recentTrades = useMemo(
+    () =>
+      accountTrades
+        .filter((trade) => sideFilter === "all" || trade.side === sideFilter)
+        .filter((trade) => statusFilter === "all" || trade.status === statusFilter)
+        .slice(0, 10),
+    [accountTrades, sideFilter, statusFilter]
+  );
+  const selectedTrade = recentTrades.find((trade) => trade.id === selectedTradeId) ?? accountTrades.find((trade) => trade.id === selectedTradeId);
   const equity = paperStatus?.status?.equity ?? paperStatus?.status?.current_value;
   const netPnl = paperStatus?.status?.pnl ?? paperStatus?.status?.unrealized_pnl;
   const fills = trades.filter((trade) => trade.status === "closed").length;
-  const accountTrades = trades.filter((trade) => trade.mode === "account");
   const openTrades = accountTrades.filter((trade) => trade.status === "open").length;
   return (
     <section className="mirror-panel">
@@ -29,6 +43,26 @@ export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatu
         <Metric label="Fills" value={`${fills}`} />
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 border-t border-cyan-400/10 p-3">
+        <span className="mr-2 text-xs uppercase tracking-[0.22em] text-cyan-200/45">Filters</span>
+        {(["all", "buy", "sell"] as const).map((value) => (
+          <button key={value} className={filterButtonClass(sideFilter === value)} type="button" onClick={() => setSideFilter(value)}>
+            {value}
+          </button>
+        ))}
+        <span className="mx-1 h-5 w-px bg-slate-800" />
+        {(["all", "open", "closed"] as const).map((value) => (
+          <button key={value} className={filterButtonClass(statusFilter === value)} type="button" onClick={() => setStatusFilter(value)}>
+            {value}
+          </button>
+        ))}
+        {selectedTrade ? (
+          <button className="ml-auto border border-slate-700 px-3 py-1 text-xs uppercase tracking-[0.16em] text-slate-300 hover:bg-slate-800" type="button" onClick={() => setSelectedTradeId(null)}>
+            Clear detail
+          </button>
+        ) : null}
+      </div>
+
       <div className="overflow-x-auto border-t border-cyan-400/10">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="bg-slate-950/70 text-xs uppercase tracking-[0.18em] text-cyan-200/45">
@@ -45,7 +79,7 @@ export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatu
           <tbody className="divide-y divide-slate-900 font-mono text-slate-300">
             {recentTrades.length ? (
               recentTrades.map((trade) => (
-                <tr key={trade.id} className="hover:bg-cyan-950/20">
+                <tr key={trade.id} className={`cursor-pointer hover:bg-cyan-950/20 ${selectedTradeId === trade.id ? "bg-cyan-950/30" : ""}`} onClick={() => setSelectedTradeId(selectedTradeId === trade.id ? null : trade.id)}>
                   <td className="py-3 pl-4 text-slate-500">{trade.opened_at ? new Date(trade.opened_at).toLocaleTimeString() : "n/a"}</td>
                   <td className="text-slate-100">{trade.ticker}</td>
                   <td>
@@ -67,6 +101,15 @@ export function PositionTable({ paperStatus, trades }: { paperStatus: PaperStatu
           </tbody>
         </table>
       </div>
+
+      {selectedTrade ? (
+        <div className="grid gap-3 border-t border-cyan-400/10 bg-slate-950/95 p-4 text-sm md:grid-cols-4">
+          <Detail label="Trade ID" value={selectedTrade.id.slice(0, 8)} />
+          <Detail label="Forecast" value={selectedTrade.forecast_id.slice(0, 8)} />
+          <Detail label="Exit" value={selectedTrade.exit_price ? number(selectedTrade.exit_price) : "open"} />
+          <Detail label="Realized PnL" value={money(selectedTrade.realized_pnl_usd)} tone={(selectedTrade.realized_pnl_usd ?? 0) >= 0 ? "good" : "bad"} />
+        </div>
+      ) : null}
 
       {positions.length ? (
         <div className="overflow-x-auto border-t border-cyan-400/10">
@@ -114,6 +157,22 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
       <p className={`mt-2 font-mono text-xl font-semibold ${color}`}>{value}</p>
     </div>
   );
+}
+
+function Detail({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
+  const color = tone === "good" ? "text-teal-300" : tone === "bad" ? "text-rose-300" : "text-slate-100";
+  return (
+    <div className="border border-slate-800 bg-slate-900/50 p-3">
+      <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-200/45">{label}</p>
+      <p className={`mt-1 font-mono ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function filterButtonClass(active: boolean) {
+  return active
+    ? "border border-cyan-300/40 bg-cyan-400/15 px-3 py-1 text-xs uppercase tracking-[0.16em] text-cyan-100"
+    : "border border-slate-800 bg-slate-950 px-3 py-1 text-xs uppercase tracking-[0.16em] text-slate-500 hover:border-cyan-400/20 hover:text-slate-200";
 }
 
 function money(value: number | null | undefined) {

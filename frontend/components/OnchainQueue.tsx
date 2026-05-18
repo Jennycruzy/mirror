@@ -21,7 +21,11 @@ export function OnchainQueue({ jobs }: { jobs: OnchainJob[] }) {
               <span className={statusClass(job.status)}>{job.status}</span>
             </div>
             {job.last_error && job.status !== "confirmed" ? <p className="mt-2 text-rose-300">{job.last_error}</p> : null}
-            {job.tx_hash ? <p className="mt-2 text-slate-400">{job.tx_hash}</p> : null}
+            {job.tx_hash ? (
+              <a className="mt-2 block break-all text-cyan-200 underline decoration-cyan-700 underline-offset-4 hover:text-white" href={`https://sepolia.basescan.org/tx/${job.tx_hash}`} target="_blank" rel="noreferrer">
+                {job.tx_hash}
+              </a>
+            ) : null}
           </article>
         ))}
       </div>

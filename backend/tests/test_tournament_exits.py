@@ -63,6 +63,14 @@ def test_exit_reason_take_profit_and_stop_loss():
     assert exit_reason(forecast, trade, 0.2) is None
 
 
+def test_exit_reason_closes_take_profit_in_recovery_mode():
+    forecast = make_forecast(take_profit_pct=1.0)
+    trade = make_trade()
+    settings = Settings(tournament_min_hold_seconds=0, tournament_recovery_take_profit_enabled=True)
+
+    assert exit_reason(forecast, trade, 1.2, settings=settings, recovery_mode=True) == "recovery_take_profit"
+
+
 def test_exit_reason_trailing_profit_lock_after_giveback():
     forecast = make_forecast(take_profit_pct=0.5)
     trade = make_trade()

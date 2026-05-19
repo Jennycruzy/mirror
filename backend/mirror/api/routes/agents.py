@@ -4,14 +4,17 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends
 
+from mirror.config import get_settings
 from mirror.db import get_session
 from mirror.models import Agent, Forecast, Trade
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+BASE_SEPOLIA_NFT_URL = "https://sepolia.basescan.org/nft"
 
 
 @router.get("")
 async def list_agents(session: AsyncSession = Depends(get_session)):
+    settings = get_settings()
     rows = (await session.execute(select(Agent).order_by(Agent.lineage, Agent.version))).scalars().all()
     now = datetime.now(UTC)
     day_start = datetime.combine(now.date(), time.min, tzinfo=UTC)
@@ -47,7 +50,7 @@ async def list_agents(session: AsyncSession = Depends(get_session)):
             "version": a.version,
             "status": a.status,
             "on_chain_token_id": a.on_chain_token_id,
-            "basescan_url": f"https://sepolia.basescan.org/token/{a.on_chain_token_id}" if a.on_chain_token_id else None,
+            "basescan_url": f"{BASE_SEPOLIA_NFT_URL}/{settings.erc8004_identity_registry}/{a.on_chain_token_id}" if a.on_chain_token_id else None,
             "rolling_24h_brier": float(brier_24h) if brier_24h is not None else None,
             "trades_today": int(trades_today or 0),
             "open_positions": int(open_positions or 0),

@@ -283,6 +283,14 @@ async def evaluate_tournament_risk(state: RedState, strategy, forecast_obj: RedF
             )
             if adaptive_reason:
                 return RiskDecision(False, adaptive_reason)
+            cooldown_reason = recent_loss_cooldown_reason(
+                list(recent_closed_trades),
+                ticker=state["ticker"],
+                side=direction,
+                cooldown_minutes=strategy.mutable.tournament_cooldown_minutes_after_loss,
+            )
+            if cooldown_reason:
+                return RiskDecision(False, cooldown_reason)
         open_positions_count = int(
             await session.scalar(
                 select(func.count()).select_from(Trade).where(
@@ -382,6 +390,25 @@ async def trend_bps_for_symbol(state: RedState) -> float | None:
 
 def spread_cap_for_symbol(settings: Settings, symbol: str, strategy_cap_bps: float) -> float:
     return settings.tournament_symbol_spread_caps_map().get(symbol.upper(), strategy_cap_bps)
+
+
+def recent_loss_cooldown_reason(trades: list[Trade], *, ticker: str, side: str, cooldown_minutes: int) -> str | None:
+    if cooldown_minutes <= 0:
+        return None
+    now = datetime.now(UTC)
+    ticker = ticker.upper()
+    side = side.lower()
+    for trade in trades:
+        if trade.ticker.upper() != ticker or trade.side.lower() != side:
+            continue
+        if trade.realized_pnl_usd is None or trade.realized_pnl_usd >= 0:
+            continue
+        if trade.closed_at is None:
+            continue
+        age_minutes = (now - trade.closed_at).total_seconds() / 60
+        if age_minutes < cooldown_minutes:
+            return f"cooldown after recent loss on {ticker} {side} ({age_minutes:.1f}m < {cooldown_minutes}m)"
+    return None
 
 
 def default_spot_pair_for_lineage(settings: Settings, lineage: str) -> str:

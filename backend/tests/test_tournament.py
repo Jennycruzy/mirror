@@ -1,10 +1,12 @@
+from datetime import UTC, datetime, timedelta
+
 from mirror.agents.strategy_schema import RedForecast, initial_strategy_yaml, parse_strategy_yaml
 from mirror.backtest.replay import ReplayResult
 from mirror.tournament.gate import evaluate_tournament_gate
 from mirror.tournament.adaptive import compute_direction_stats, losing_direction_reason, rank_symbols_by_recent_pnl
 from mirror.tournament.ranking import SymbolOpportunity, rank_opportunities
 from mirror.tournament.risk import RiskDecision, validate_tournament_trade
-from mirror.orchestrator.graph import compute_spread_bps
+from mirror.orchestrator.graph import compute_spread_bps, recent_loss_cooldown_reason
 
 
 class ClosedTrade:
@@ -145,3 +147,15 @@ def test_adaptive_symbol_order_routes_best_recent_performer_first():
     )
     ranked = rank_symbols_by_recent_pnl(["PI_XBTUSD", "PI_ETHUSD", "PI_XRPUSD"], stats, min_samples=1)
     assert ranked == ["PI_XRPUSD", "PI_ETHUSD", "PI_XBTUSD"]
+
+
+def test_recent_loss_cooldown_blocks_same_symbol_direction():
+    reason = recent_loss_cooldown_reason(
+        [ClosedTrade("PI_XBTUSD", "buy", -1.2, datetime.now(UTC) - timedelta(minutes=5))],
+        ticker="PI_XBTUSD",
+        side="buy",
+        cooldown_minutes=20,
+    )
+
+    assert reason is not None
+    assert "cooldown after recent loss" in reason

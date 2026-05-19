@@ -48,6 +48,7 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
         await session.commit()
         return ExitSweepResult(closed_count=0, degraded=degraded)
 
+    recovery_mode = await account_pnl_below_recovery_threshold(session, settings)
     if settings.kraken_execution_mode == "spot_paper":
         symbols = sorted({trade.ticker for trade in trades})
         try:
@@ -92,7 +93,7 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
             continue
         entry = trade.entry_price or price
         pnl_pct = leveraged_pnl_pct(trade.side, entry, price, trade.leverage)
-        reason = exit_reason(forecast, trade, pnl_pct, settings=settings)
+        reason = exit_reason(forecast, trade, pnl_pct, settings=settings, recovery_mode=recovery_mode)
         if reason is None:
             update_exit_state(trade, pnl_pct)
             continue
@@ -153,12 +154,21 @@ async def manage_tournament_exits(session: AsyncSession, settings: Settings) -> 
     return ExitSweepResult(closed_count=closed_count, degraded=degraded)
 
 
-def exit_reason(forecast: Forecast, trade: Trade, pnl_pct: float, settings: Settings | None = None) -> str | None:
+def exit_reason(
+    forecast: Forecast,
+    trade: Trade,
+    pnl_pct: float,
+    settings: Settings | None = None,
+    *,
+    recovery_mode: bool = False,
+) -> str | None:
     min_hold_seconds = settings.tournament_min_hold_seconds if settings else 0
     if min_hold_seconds and (datetime.now(UTC) - trade.opened_at).total_seconds() < min_hold_seconds:
         return None
     if pnl_pct >= forecast.take_profit_pct:
         update_exit_state(trade, pnl_pct)
+        if recovery_mode and settings and settings.tournament_recovery_take_profit_enabled:
+            return "recovery_take_profit"
         return None
     if pnl_pct <= -forecast.stop_loss_pct:
         return "stop_loss"
@@ -226,3 +236,23 @@ async def record_equity_snapshot(session: AsyncSession, settings: Settings, krak
             },
         )
     )
+
+
+async def account_pnl_below_recovery_threshold(session: AsyncSession, settings: Settings) -> bool:
+    if not settings.tournament_recovery_take_profit_enabled:
+        return False
+    latest = (
+        await session.execute(
+            select(Event)
+            .where(Event.kind == "account_equity_snapshot")
+            .order_by(Event.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest is None:
+        return False
+    payload = latest.payload_json or {}
+    net_pnl = payload.get("net_pnl")
+    if not isinstance(net_pnl, int | float):
+        return False
+    return float(net_pnl) < settings.tournament_recovery_pnl_threshold_usd

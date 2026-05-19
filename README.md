@@ -1,6 +1,6 @@
 # MIRROR
 
-MIRROR is a mock-free AI trading-agent system. Four Red agents trade through the official Kraken CLI in either futures paper mode or authenticated Kraken demo-futures account mode, depending on configuration. Blue agents analyze Red calibration failures. Gemini proposes strategy patches, deterministic holdout replay decides whether they survive, and promoted versions are queued or registered as ERC-8004 identities on Base Sepolia.
+MIRROR is an AI trading-agent system. Four Red agents trade through the official Kraken CLI in either futures paper mode or authenticated Kraken demo-futures account mode, depending on configuration. Blue agents analyze Red calibration failures. Featherless proposes strategy patches and crossover candidates, deterministic holdout replay decides whether they survive, and promoted versions are queued or registered as ERC-8004 identities on Base Sepolia.
 
 Calibration is the fitness function: Red agents evolve by reducing the gap between stated confidence and realized accuracy.
 
@@ -19,7 +19,7 @@ Calibration is the fitness function: Red agents evolve by reducing the gap betwe
 - Frontend: Next.js App Router, TypeScript strict mode, Tailwind, Recharts, D3-style SVG lineage rendering, SSE.
 - Database: Postgres through Docker Compose for local development.
 - Trading: official Kraken CLI only, with support for futures paper mode and authenticated demo-futures account mode.
-- Inference: Featherless/OpenAI-compatible Qwen for Red/Blue, Gemini for patching and crossover.
+- Inference: Featherless/OpenAI-compatible Qwen for Red/Blue, patching, and crossover, with optional Gemini support when explicitly configured.
 - Identity: ERC-8004 Identity and Reputation registries on Base Sepolia.
 - Metadata: IPFS pinning through configured provider.
 
@@ -29,7 +29,7 @@ Calibration is the fitness function: Red agents evolve by reducing the gap betwe
 - MIRROR refuses to place orders unless the configured Kraken execution mode is verified.
 - In futures paper mode, xStock perpetual symbols must be discovered from real Kraken output.
 - No mainnet or real-capital trading path is implemented.
-- No external integration is mocked.
+- External integrations use the real service surfaces configured for the environment.
 - Missing keys, CLIs, RPCs, or IPFS providers fail loudly through CLI checks, events, API health, and dashboard state.
 - Secrets are redacted from structured logs.
 
@@ -140,7 +140,7 @@ cd backend
 uv run mirror verify
 ```
 
-`mirror verify` checks Python, Postgres, Kraken CLI, the configured Kraken execution mode, the configured futures symbol universe or paper-mode symbol discovery path, Featherless, Gemini, Base Sepolia, ERC-8004 ABIs/addresses, and frontend environment.
+`mirror verify` checks Python, Postgres, Kraken CLI, the configured Kraken execution mode, the configured futures symbol universe or paper-mode symbol discovery path, Featherless, the configured patcher provider, Base Sepolia, ERC-8004 ABIs/addresses, and frontend environment.
 
 Run local smoke checks that do not require live external success:
 
@@ -286,7 +286,7 @@ For the lablab/Kraken Trading Performance track, ranking is based on net PnL ove
 - A same-symbol/same-direction loss cooldown prevents immediate revenge entries.
 - Exit sweeps enforce stop-loss, trailing profit lock, time-stop, winner extension, and recovery take-profit.
 
-Positive PnL is not guaranteed. These controls reduce repeated loss patterns and lock gains sooner during drawdown while preserving the mock-free exchange and audit trail.
+Positive PnL is not guaranteed. These controls reduce repeated loss patterns and lock gains sooner during drawdown while preserving a real exchange and audit trail.
 
 ## Recent Changes
 
